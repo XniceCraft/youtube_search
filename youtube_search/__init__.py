@@ -1,27 +1,36 @@
-# pylint: disable=line-too-long
+# pylint: disable=line-too-long, too-many-instance-attributes, too-many-arguments
 """
 Module to search videos on youtuve
 """
-
-from typing import Optional, Union
-from platform import system
-from unicodedata import normalize as unicode_normalize
 import asyncio
 import json
 import re
-from aiohttp import ClientSession
-from requests.utils import quote
+from typing import Iterator, List, Optional, Union
+from platform import system
+from unicodedata import normalize as unicode_normalize
 import requests
+from aiohttp import ClientSession
 
 if system() == "Windows":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-BASE_URL = "https://youtube.com"
+BASE_URL = "https://www.youtube.com"
 
 
 def encode_url(url: str) -> str:
-    """Encode url"""
-    return quote(url).replace("%20", "+")
+    """
+    Encode url and replace space to '+'
+
+    Parameters
+    ----------
+    url: str
+        URL
+
+    Returns
+    -------
+    str
+    """
+    return requests.utils.quote(url).replace("%20", "+")
 
 
 class YoutubeSearch:
@@ -31,199 +40,216 @@ class YoutubeSearch:
 
     def __init__(
         self,
-        search_query: str,
-        max_results: Union[int, None] = 20,
+        max_results: Optional[None] = 20,
         language: Optional[str] = None,
         region: Optional[str] = None,
-    ) -> None:
+        timeout: int = 10,
+        proxy: Optional[dict] = None,
+        json_parser=json
+    ):
         """
         Parameters
         ----------
-        search_query : str
-            The search query
         max_results : Union[int, None], default 20
             The maximum result that will be returned. Set to None to remove the limit
         language : str, default None
             Youtube language
         region : str, default None
             Youtube region
-
-        Return
-        ------
-        None
+        timeout : int
+            Request timeout
+        proxy : Optional[dict]
+            Request proxy
+        json_parser : Module, default json
+            Custom json parser
         """
         if max_results is not None and max_results < 0:
-            raise ValueError("Max result must be a whole number")
+            raise ValueError(
+                "Max result must be a whole number or set to None to remove the limit"
+            )
+        self.json = json_parser
+        requests.models.complexjson = json_parser
+        self.max_results = max_results
         self.__api_key = None
-        self.__data = {
-            "context": {}
-        }
         self.__cookies = {
             "PREF": f"hl={language}&gl={region}",
             "domain": ".youtube.com",
         }
-        self.__max_results = max_results
-        self.__search_query = search_query
+        self.__data = {}
+        self.__requests_kwargs = {"timeout": timeout, "proxies": proxy}
+        self.__session = requests.Session()
         self.__videos = []
+
+    def __enter__(self) -> "YoutubeSearch":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
 
     @property
     def count(self) -> int:
         """
-        Return how many results are in the list
+        Returns
+        -------
+        int
+            How many video are in the list
         """
         return len(self.__videos)
 
-    @property
-    def max_results(self) -> int:
+    def close(self) -> None:
         """
-        Return max results
+        Close the context manager
         """
-        return self.__max_results
+        self.__api_key = None
+        self.__data.clear()
+        self.__videos.clear()
+        self.__session.close()
 
-    def fetch(self, timeout: int = 10, **kwargs):
+    def search(self, query: str = None) -> "YoutubeSearch":
         """
-        Get the list of searched videos
+        Parameters
+        ----------
+        query : str
+            Search query
+
+        Returns
+        -------
+        self
+            YoutubeSearch object
+        """
+        self.__videos.clear()
+        if query:
+            self.__api_key = None
+            self.__data.clear()
+            url = f"{BASE_URL}/results?search_query={encode_url(query)}"
+            body = self.__session.get(
+                url, cookies=self.__cookies, **self.__requests_kwargs
+            ).text
+        else:
+            if self.__api_key is None:
+                raise ValueError("Last search not found!")
+            url = f"{BASE_URL}/youtubei/v1/search?{self.__api_key}&prettyPrint=false"
+            body = self.__session.post(
+                url,
+                cookies=self.__cookies,
+                data=self.json.dumps(self.__data),
+                **self.__requests_kwargs,
+            ).json()
+        self.__get_video(body)
+        return self
+
+    def __parse_html(self, response: Union[str, dict]) -> Iterator[list]:
+        """
+        Parse the html response to get the videos
 
         Parameters
         ----------
-        **kwargs
-            Keyword arguments will be passed to requests get
+        response: Union[str, dict]
+            The response body
 
-        Return
-        ------
-        YoutubeSearch:
-            YoutubeSearch object
+        Returns
+        -------
+        Iterator[list]
+            Contains list of video data
         """
-        encoded_query = encode_url(self.__search_query)
-        url = f"{BASE_URL}/results?search_query={encoded_query}"
-        headers = {
-            "content-type": "application/json",
-            "origin": "https://www.youtube.com",
-            "x-origin": "https://www.youtube.com",
-        }
-        headers['referer'] = url
-        response = (
-            requests.post(
-                f"https://www.youtube.com/youtubei/v1/search?{self.__api_key}&prettyPrint=false",
-                cookies=self.__cookies,
-                timeout=timeout,
-                headers=headers,
-                data=json.dumps(self.__data),
-                **kwargs,
-            ).text
-            if self.__api_key
-            else requests.get(
-                url, cookies=self.__cookies, timeout=timeout, **kwargs
-            ).text
-        )
-        self.__parse_html(response)
-        return self
-
-    def __get_content(self, response: str):
-        if self.__api_key is not None:
-            data = json.loads(response)
-            return data["onResponseReceivedCommands"][0][
+        if self.__api_key:
+            return response["onResponseReceivedCommands"][0][
                 "appendContinuationItemsAction"
             ]["continuationItems"]
 
         start = response.index("ytInitialData") + len("ytInitialData") + 3
         end = response.index("};", start) + 1
         json_str = response[start:end]
-        data = json.loads(json_str)
+        data = self.json.loads(json_str)
         self.__api_key = re.search(
             r"(?:\"INNERTUBE_API_KEY\":\")(?P<api_key>[A-Za-z0-9_-]+)(?:\",)",
             response,
         )["api_key"]
-        self.__data['context'] = json.loads(re.search(r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.*)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")", response, re.DOTALL)['context'])
-        self.__data['continuation'] = re.search(r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")", response)['token']
+        self.__data["context"] = self.json.loads(
+            re.search(
+                r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.*)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")",
+                response,
+                re.DOTALL,
+            )["context"]
+        )
+        self.__data["continuation"] = re.search(
+            r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")",
+            response,
+        )["token"]
         return data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"][
             "sectionListRenderer"
         ]["contents"]
 
-    def __parse_html(self, response: str) -> None:
+    def __get_video(self, response: Union[str, dict]) -> None:
         """
-        Parse the html response to get the videos
+        Get video from parsed html
 
         Parameters
         ----------
-        response: str
-            The html response
-
-        Return
-        ------
-        None
+        response: Union[str, dict]
+            Passed to self.__parse_html function
         """
-        for contents in self.__get_content(response):
+        for contents in self.__parse_html(response):
             if "itemSectionRenderer" not in contents:
                 continue
-            for video in contents["itemSectionRenderer"]["contents"]:
-                if (
-                    self.__max_results is not None
-                    and len(self.__videos) >= self.__max_results
-                ):
+            for video in contents.get("itemSectionRenderer", {}).get("contents", {}):
+                if self.max_results is not None and self.count >= self.max_results:
                     return
                 res = {}
-                if "videoRenderer" in video:
-                    video_data = video.get("videoRenderer", {})
-                    owner_url_suffix = (
-                        video_data.get("ownerText", {})
-                        .get("runs", [{}])[0]
-                        .get("navigationEndpoint", {})
-                        .get("browseEndpoint", {})
-                        .get("canonicalBaseUrl")
-                    )
-                    res["id"] = video_data.get("videoId", None)
-                    res["thumbnails"] = [
-                        thumb.get("url", None)
-                        for thumb in video_data.get("thumbnail", {}).get(
-                            "thumbnails", [{}]
-                        )
-                    ]
-                    res["title"] = (
-                        video_data.get("title", {})
-                        .get("runs", [[{}]])[0]
-                        .get("text", None)
-                    )
-                    res["desc_snippet"] = unicode_normalize(
-                        "NFKD",
-                        "".join(
-                            [
-                                item.get("text", "")
-                                for item in video_data.get(
-                                    "detailedMetadataSnippets", [{}]
-                                )[0]
-                                .get("snippetText", {})
-                                .get("runs", [{}])
-                            ]
-                        ),
-                    )
-                    res["channel"] = (
-                        video_data.get("longBylineText", {})
-                        .get("runs", [[{}]])[0]
-                        .get("text", None)
-                    )
-                    res["duration"] = video_data.get("lengthText", {}).get(
-                        "simpleText", 0
-                    )
-                    res["views"] = video_data.get("viewCountText", {}).get(
-                        "simpleText", 0
-                    )
-                    res["publish_time"] = video_data.get("publishedTimeText", {}).get(
-                        "simpleText", 0
-                    )
-                    res["url_suffix"] = (
-                        video_data.get("navigationEndpoint", {})
-                        .get("commandMetadata", {})
-                        .get("webCommandMetadata", {})
-                        .get("url", None)
-                    )
-                    res["owner_url"] = f"{BASE_URL}{owner_url_suffix}"
-                    res["owner_name"] = (
-                        video_data.get("ownerText", {}).get("runs", [{}])[0].get("text")
-                    )
-                    self.__videos.append(res)
+                if "videoRenderer" not in video:
+                    continue
+                video_data = video.get("videoRenderer", {})
+                owner_url_suffix = (
+                    video_data.get("ownerText", {})
+                    .get("runs", [{}])[0]
+                    .get("navigationEndpoint", {})
+                    .get("browseEndpoint", {})
+                    .get("canonicalBaseUrl")
+                )
+                res["id"] = video_data.get("videoId", None)
+                res["thumbnails"] = [
+                    thumb.get("url", None)
+                    for thumb in video_data.get("thumbnail", {}).get("thumbnails", [{}])
+                ]
+                res["title"] = (
+                    video_data.get("title", {}).get("runs", [[{}]])[0].get("text", None)
+                )
+                res["desc_snippet"] = unicode_normalize(
+                    "NFKD",
+                    "".join(
+                        [
+                            item.get("text", "")
+                            for item in video_data.get(
+                                "detailedMetadataSnippets", [{}]
+                            )[0]
+                            .get("snippetText", {})
+                            .get("runs", [{}])
+                        ]
+                    ),
+                )
+                res["channel"] = (
+                    video_data.get("longBylineText", {})
+                    .get("runs", [[{}]])[0]
+                    .get("text", None)
+                )
+                res["duration"] = video_data.get("lengthText", {}).get("simpleText", 0)
+                res["views"] = video_data.get("viewCountText", {}).get("simpleText", 0)
+                res["publish_time"] = video_data.get("publishedTimeText", {}).get(
+                    "simpleText", 0
+                )
+                res["url_suffix"] = (
+                    video_data.get("navigationEndpoint", {})
+                    .get("commandMetadata", {})
+                    .get("webCommandMetadata", {})
+                    .get("url", None)
+                )
+                res["owner_url"] = f"{BASE_URL}{owner_url_suffix}"
+                res["owner_name"] = (
+                    video_data.get("ownerText", {}).get("runs", [{}])[0].get("text")
+                )
+                self.__videos.append(res)
 
-    def list(self, clear_cache: bool = True) -> list:
+    def list(self, clear_cache: bool = True) -> List[dict]:
         """
         Return the list of videos
 
@@ -234,30 +260,10 @@ class YoutubeSearch:
 
         Return
         ------
-        list:
+        List[dict]:
             The list of videos
         """
-        if clear_cache:
-            result = self.__videos.copy()
-            self.__videos.clear()
-            return result
-        return self.__videos
-
-    def json_string(self, clear_cache=True):
-        """
-        Convert the result into json string
-
-        Parameters
-        ----------
-        clear_cache: bool, default True
-            Clear the result cache
-
-        Return
-        ------
-        str:
-            The json string
-        """
-        result = json.dumps({"videos": self.__videos})
+        result = self.__videos.copy()
         if clear_cache:
             self.__videos.clear()
         return result
@@ -270,116 +276,185 @@ class AsyncYoutubeSearch:
 
     def __init__(
         self,
-        search_query: str,
-        max_results: Union[int, None] = 20,
+        max_results: Optional[None] = 20,
         language: Optional[str] = None,
         region: Optional[str] = None,
-    ) -> None:
+        timeout: int = 10,
+        proxy: Optional[dict] = None,
+        json_parser=json
+    ):
         """
         Parameters
         ----------
-        search_query : str
-            The search query
         max_results : Union[int, None], default 20
             The maximum result that will be returned. Set to None to remove the limit
         language : str, default None
             Youtube language
         region : str, default None
             Youtube region
-
-        Return
-        ------
-        None
+        timeout : int
+            Request timeout
+        proxy : Optional[dict]
+            Request proxy
+        json_parser : Module, default json
+            Custom json parser
         """
-        if max_results is None or max_results < 0:
-            raise ValueError("Max result must be a whole number")
-        self.__cookies = {"PREF": f"hl={language}&gl={region}"}
-        self.__max_results = max_results
-        self.__query = search_query
+        if max_results is not None and max_results < 0:
+            raise ValueError(
+                "Max result must be a whole number or set to None to remove the limit"
+            )
+        self.json = json_parser
+        self.max_results = max_results
+        self.__api_key = None
+        self.__cookies = {
+            "PREF": f"hl={language}&gl={region}",
+        }
+        self.__data = {}
+        self.__requests_kwargs = {"timeout": timeout, "proxy": proxy.get("https", "")}
+        self.__session = ClientSession()
         self.__videos = []
+
+    async def __aenter__(self) -> "AsyncYoutubeSearch":
+        return self
+
+    async def __aexit__(self, *args) -> None:
+        await self.close()
 
     @property
     def count(self) -> int:
         """
-        Return how many results are in the list
+        Returns
+        -------
+        int
+            How many video are in the list
         """
         return len(self.__videos)
 
-    @property
-    def max_results(self) -> int:
+    async def close(self) -> None:
         """
-        Return max results
+        Close the context manager
         """
-        return self.__max_results
+        self.__api_key = None
+        self.__data.clear()
+        self.__videos.clear()
+        await self.__session.close()
+        await asyncio.sleep(
+            0.250
+        )  #  https://docs.aiohttp.org/en/stable/client_advanced.html#graceful-shutdown
 
-    async def fetch(self, proxies: Optional[dict] = None, timeout: int = 10, **kwargs):
+    async def search(self, query: str = None) -> "AsyncYoutubeSearch":
         """
-        Fetch and parse the youtube search html
-
         Parameters
         ----------
-        proxies: Optional[dict]
-            Proxies like {'https': 127.0.0.1, 'http': 127.0.0.1}
-        **kwargs
-            Keyword arguments will be passed to aiohttp get
+        query : str
+            Search query
 
-        Return
-        ------
-        AsyncYoutubeSearch:
+        Returns
+        -------
+        self
             AsyncYoutubeSearch object
         """
-        if (
-            proxies
-        ):  # Compatibility for http proxy (In case user passed proxy as same as the requests module format)
-            kwargs["proxy"] = kwargs["proxies"].get("http", "")
-        async with ClientSession(cookies=self.__cookies) as session:
-            async with session.get(
-                f"{BASE_URL}/results?search_query={encode_url(self.__query)}",
-                timeout=timeout,
-                **kwargs,
-            ) as resp:
-                response_body = await resp.text()
-        await self.__parse_html(response_body)
+        self.__videos.clear()
+        if query:
+            self.__api_key = None
+            self.__data.clear()
+            url = f"{BASE_URL}/results?search_query={encode_url(query)}"
+            resp = await self.__session.get(
+                url, cookies=self.__cookies, **self.__requests_kwargs
+            )
+            body = await resp.text()
+        else:
+            if self.__api_key is None:
+                raise ValueError("Last search not found!")
+            url = f"{BASE_URL}/youtubei/v1/search?{self.__api_key}&prettyPrint=false"
+            resp = await self.__session.post(
+                url,
+                cookies=self.__cookies,
+                data=self.json.dumps(self.__data),
+                headers={"content-type": "application/json"},
+                **self.__requests_kwargs,
+            )
+            body = await resp.json(loads=self.json.loads)
+        await self.__get_video(body)
         return self
 
-    async def __parse_html(self, response: str) -> None:
+    def __parse_html(self, response: Union[str, dict]) -> Iterator[list]:
         """
         Parse the html response to get the videos
 
         Parameters
         ----------
-        response: str
-            The html response
+        response: Union[str, dict]
+            The response body
 
-        Return
-        ------
-        None
+        Returns
+        -------
+        Iterator[list]
+            Contains list of video data
         """
+        if self.__api_key:
+            return response["onResponseReceivedCommands"][0][
+                "appendContinuationItemsAction"
+            ]["continuationItems"]
+
         start = response.index("ytInitialData") + len("ytInitialData") + 3
         end = response.index("};", start) + 1
         json_str = response[start:end]
-        data = json.loads(json_str)
+        data = self.json.loads(json_str)
 
+        self.__api_key = re.search(
+            r"(?:\"INNERTUBE_API_KEY\":\")(?P<api_key>[A-Za-z0-9_-]+)(?:\",)",
+            response,
+        )["api_key"]
+        self.__data["context"] = self.json.loads(
+            re.search(
+                r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.*)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")",
+                response,
+                re.DOTALL,
+            )["context"]
+        )
+        self.__data["continuation"] = re.search(
+            r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")",
+            response,
+        )["token"]
+        return data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"][
+            "sectionListRenderer"
+        ]["contents"]
+
+    async def __get_video(self, response: Union[str, dict]) -> None:
+        """
+        Get video from parsed html
+
+        Parameters
+        ----------
+        response: Union[str, dict]
+            Passed to self.__parse_html function
+        """
         tasks = []
-        for contents in data["contents"]["twoColumnSearchResultsRenderer"][
-            "primaryContents"
-        ]["sectionListRenderer"]["contents"]:
+        for contents in self.__parse_html(response):
             if "itemSectionRenderer" not in contents:
                 continue
             tasks.extend(
                 [
                     self.__assign_to_list(video)
-                    for video in contents["itemSectionRenderer"]["contents"]
+                    for video in contents.get("itemSectionRenderer", {}).get(
+                        "contents", {}
+                    )
                     if "videoRenderer" in video
                 ]
             )
         await asyncio.gather(*tasks)
 
-    async def __assign_to_list(self, video):
+    async def __assign_to_list(self, video: dict) -> None:
         """
-        Assign video data to video list
+        Assign video data to list
+
+        Parameters
+        ----------
+        video : dict
+            Video data in dict
         """
-        if self.__max_results is not None and len(self.__videos) >= self.__max_results:
+        if self.max_results is not None and self.count >= self.max_results:
             return
         video_data = video.get("videoRenderer", {})
         owner_url_suffix = (
@@ -431,7 +506,7 @@ class AsyncYoutubeSearch:
             }
         )
 
-    def list(self, clear_cache: bool = True) -> list:
+    def list(self, clear_cache: bool = True) -> List[dict]:
         """
         Return the list of videos
 
@@ -442,30 +517,10 @@ class AsyncYoutubeSearch:
 
         Return
         ------
-        list:
+        List[dict]:
             The list of videos
         """
-        if clear_cache:
-            result = self.__videos.copy()
-            self.__videos.clear()
-            return result
-        return self.__videos
-
-    def json_string(self, clear_cache: bool = True) -> str:
-        """
-        Convert the result into json string
-
-        Parameters
-        ----------
-        clear_cache: bool, default True
-            Clear the result cache
-
-        Return
-        ------
-        str:
-            The json string
-        """
-        result = json.dumps({"videos": self.__videos})
+        result = self.__videos.copy()
         if clear_cache:
             self.__videos.clear()
         return result
