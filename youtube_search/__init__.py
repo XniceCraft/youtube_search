@@ -3,6 +3,7 @@
 Module to search videos on youtuve
 """
 import asyncio
+import concurrent.futures
 import json
 import re
 from typing import Iterator, List, Optional, Union
@@ -122,19 +123,22 @@ class YoutubeSearch:
             self.__api_key = None
             self.__data.clear()
             url = f"{BASE_URL}/results?search_query={encode_url(query)}"
-            body = self.__session.get(
+            resp = self.__session.get(
                 url, cookies=self.__cookies, **self.__requests_kwargs
-            ).text
+            )
+            body = resp.text
         else:
             if self.__api_key is None:
                 raise ValueError("Last search not found!")
             url = f"{BASE_URL}/youtubei/v1/search?{self.__api_key}&prettyPrint=false"
-            body = self.__session.post(
+            resp = self.__session.post(
                 url,
                 cookies=self.__cookies,
                 data=self.json.dumps(self.__data),
                 **self.__requests_kwargs,
-            ).json()
+            )
+            body = resp.json()
+        resp.close()
         self.__get_video(body)
         return self
 
@@ -377,10 +381,11 @@ class AsyncYoutubeSearch:
                 **self.__requests_kwargs,
             )
             body = await resp.json(loads=self.json.loads)
+        await resp.release()
         await self.__get_video(body)
         return self
 
-    def __parse_html(self, response: Union[str, dict]) -> Iterator[list]:
+    async def __parse_html(self, response: Union[str, dict]) -> Iterator[list]:
         """
         Parse the html response to get the videos
 
@@ -399,26 +404,40 @@ class AsyncYoutubeSearch:
                 "appendContinuationItemsAction"
             ]["continuationItems"]
 
+        loop = asyncio.get_event_loop()
         start = response.index("ytInitialData") + len("ytInitialData") + 3
         end = response.index("};", start) + 1
         json_str = response[start:end]
-        data = self.json.loads(json_str)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            data = await loop.run_in_executor(
+                pool,
+                lambda: self.json.loads(json_str)
+            )
 
-        self.__api_key = re.search(
-            r"(?:\"INNERTUBE_API_KEY\":\")(?P<api_key>[A-Za-z0-9_-]+)(?:\",)",
-            response,
-        )["api_key"]
-        self.__data["context"] = self.json.loads(
-            re.search(
-                r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.*)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")",
-                response,
-                re.DOTALL,
-            )["context"]
-        )
-        self.__data["continuation"] = re.search(
-            r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")",
-            response,
-        )["token"]
+            self.__api_key = await loop.run_in_executor(
+                pool,
+                lambda: re.search(
+                    r"(?:\"INNERTUBE_API_KEY\":\")(?P<api_key>[A-Za-z0-9_-]+)(?:\",)",
+                    response,
+                )["api_key"]
+            )
+            self.__data["context"] = await loop.run_in_executor(
+                pool,
+                lambda: self.json.loads(
+                    re.search(
+                        r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.*)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")",
+                        response,
+                        re.DOTALL,
+                    )["context"]
+                )
+            )
+            self.__data["continuation"] = await loop.run_in_executor(
+                pool,
+                lambda: re.search(
+                    r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")",
+                    response,
+                )["token"]
+            )
         return data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"][
             "sectionListRenderer"
         ]["contents"]
@@ -432,51 +451,32 @@ class AsyncYoutubeSearch:
         response: Union[str, dict]
             Passed to self.__parse_html function
         """
-        tasks = []
-        for contents in self.__parse_html(response):
+        for contents in await self.__parse_html(response):
             if "itemSectionRenderer" not in contents:
                 continue
-            tasks.extend(
-                [
-                    self.__assign_to_list(video)
-                    for video in contents.get("itemSectionRenderer", {}).get(
-                        "contents", {}
-                    )
-                    if "videoRenderer" in video
-                ]
-            )
-        await asyncio.gather(*tasks)
-
-    async def __assign_to_list(self, video: dict) -> None:
-        """
-        Assign video data to list
-
-        Parameters
-        ----------
-        video : dict
-            Video data in dict
-        """
-        if self.max_results is not None and self.count >= self.max_results:
-            return
-        video_data = video.get("videoRenderer", {})
-        owner_url_suffix = (
-            video_data.get("ownerText", {})
-            .get("runs", [{}])[0]
-            .get("navigationEndpoint", {})
-            .get("browseEndpoint", {})
-            .get("canonicalBaseUrl")
-        )
-        self.__videos.append(
-            {
-                "id": video_data.get("videoId", None),
-                "thumbnails": [
+            for video in contents.get("itemSectionRenderer", {}).get("contents", {}):
+                if self.max_results is not None and self.count >= self.max_results:
+                    return
+                res = {}
+                if "videoRenderer" not in video:
+                    continue
+                video_data = video.get("videoRenderer", {})
+                owner_url_suffix = (
+                    video_data.get("ownerText", {})
+                    .get("runs", [{}])[0]
+                    .get("navigationEndpoint", {})
+                    .get("browseEndpoint", {})
+                    .get("canonicalBaseUrl")
+                )
+                res["id"] = video_data.get("videoId", None)
+                res["thumbnails"] = [
                     thumb.get("url", None)
                     for thumb in video_data.get("thumbnail", {}).get("thumbnails", [{}])
-                ],
-                "title": video_data.get("title", {})
-                .get("runs", [[{}]])[0]
-                .get("text", None),
-                "desc_snippet": unicode_normalize(
+                ]
+                res["title"] = (
+                    video_data.get("title", {}).get("runs", [[{}]])[0].get("text", None)
+                )
+                res["desc_snippet"] = unicode_normalize(
                     "NFKD",
                     "".join(
                         [
@@ -488,25 +488,28 @@ class AsyncYoutubeSearch:
                             .get("runs", [{}])
                         ]
                     ),
-                ),
-                "channel": video_data.get("longBylineText", {})
-                .get("runs", [[{}]])[0]
-                .get("text", None),
-                "duration": video_data.get("lengthText", {}).get("simpleText", 0),
-                "views": video_data.get("viewCountText", {}).get("simpleText", 0),
-                "publish_time": video_data.get("publishedTimeText", {}).get(
+                )
+                res["channel"] = (
+                    video_data.get("longBylineText", {})
+                    .get("runs", [[{}]])[0]
+                    .get("text", None)
+                )
+                res["duration"] = video_data.get("lengthText", {}).get("simpleText", 0)
+                res["views"] = video_data.get("viewCountText", {}).get("simpleText", 0)
+                res["publish_time"] = video_data.get("publishedTimeText", {}).get(
                     "simpleText", 0
-                ),
-                "url_suffix": video_data.get("navigationEndpoint", {})
-                .get("commandMetadata", {})
-                .get("webCommandMetadata", {})
-                .get("url", None),
-                "owner_url": f"{BASE_URL}{owner_url_suffix}",
-                "owner_name": video_data.get("ownerText", {})
-                .get("runs", [{}])[0]
-                .get("text"),
-            }
-        )
+                )
+                res["url_suffix"] = (
+                    video_data.get("navigationEndpoint", {})
+                    .get("commandMetadata", {})
+                    .get("webCommandMetadata", {})
+                    .get("url", None)
+                )
+                res["owner_url"] = f"{BASE_URL}{owner_url_suffix}"
+                res["owner_name"] = (
+                    video_data.get("ownerText", {}).get("runs", [{}])[0].get("text")
+                )
+                self.__videos.append(res)
 
     def list(self, clear_cache: bool = True) -> List[dict]:
         """
