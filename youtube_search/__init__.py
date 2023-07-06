@@ -310,7 +310,9 @@ class AsyncYoutubeSearch:
             "PREF": f"hl={language}&gl={region}",
         }
         self.__data = {}
-        self.__requests_kwargs = {"timeout": timeout, "proxy": proxy.get("https", "")}
+        self.__requests_kwargs = {"timeout": timeout}
+        if isinstance(proxy, dict):
+            self.__requests_kwargs["proxy"] = proxy.get("https", "")
         self.__session = ClientSession()
         self.__videos = []
 
