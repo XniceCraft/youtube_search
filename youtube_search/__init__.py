@@ -41,12 +41,12 @@ class YoutubeSearch:
 
     def __init__(
         self,
-        max_results: Optional[None] = 20,
+        max_results: Optional[int] = None,
         language: Optional[str] = None,
         region: Optional[str] = None,
         timeout: int = 10,
         proxy: Optional[dict] = None,
-        json_parser=json
+        json_parser=json,
     ):
         """
         Parameters
@@ -106,12 +106,14 @@ class YoutubeSearch:
         self.__videos.clear()
         self.__session.close()
 
-    def search(self, query: str = None) -> "YoutubeSearch":
+    def search(self, query: str = None, pages: int = 1) -> "YoutubeSearch":
         """
         Parameters
         ----------
         query : str
             Search query
+        pages : str
+            How many page you wanna scroll
 
         Returns
         -------
@@ -122,25 +124,43 @@ class YoutubeSearch:
         if query:
             self.__api_key = None
             self.__data.clear()
+        if self.__api_key is None and not query:
+            raise ValueError("Last search query not found!")
+        for i in range(pages):
+            if i == 0 and query:
+                self.__search(query, True)
+                continue
+            self.__search(query)
+        return self
+
+    def __search(self, query: str, first: bool = False):
+        """
+        Search wrapper
+
+        Parameters
+        ----------
+        query: str
+            Search query
+        first: bool, default False
+            Is the first time search the query
+        """
+        if first:
             url = f"{BASE_URL}/results?search_query={encode_url(query)}"
             resp = self.__session.get(
                 url, cookies=self.__cookies, **self.__requests_kwargs
             )
             body = resp.text
-        else:
-            if self.__api_key is None:
-                raise ValueError("Last search not found!")
-            url = f"{BASE_URL}/youtubei/v1/search?{self.__api_key}&prettyPrint=false"
-            resp = self.__session.post(
-                url,
-                cookies=self.__cookies,
-                data=self.json.dumps(self.__data),
-                **self.__requests_kwargs,
-            )
-            body = resp.json()
-        resp.close()
+            self.__get_video(body)
+            return
+        url = f"{BASE_URL}/youtubei/v1/search?{self.__api_key}&prettyPrint=false"
+        resp = self.__session.post(
+            url,
+            cookies=self.__cookies,
+            data=self.json.dumps(self.__data),
+            **self.__requests_kwargs,
+        )
+        body = resp.json()
         self.__get_video(body)
-        return self
 
     def __parse_html(self, response: Union[str, dict]) -> Iterator[list]:
         """
@@ -280,12 +300,12 @@ class AsyncYoutubeSearch:
 
     def __init__(
         self,
-        max_results: Optional[None] = 20,
+        max_results: Optional[int] = None,
         language: Optional[str] = None,
         region: Optional[str] = None,
         timeout: int = 10,
         proxy: Optional[dict] = None,
-        json_parser=json
+        json_parser=json,
     ):
         """
         Parameters
@@ -348,12 +368,14 @@ class AsyncYoutubeSearch:
             0.250
         )  #  https://docs.aiohttp.org/en/stable/client_advanced.html#graceful-shutdown
 
-    async def search(self, query: str = None) -> "AsyncYoutubeSearch":
+    async def search(self, query: str = None, pages: int = 1) -> "AsyncYoutubeSearch":
         """
         Parameters
         ----------
         query : str
             Search query
+        pages : str
+            How many page you wanna scroll
 
         Returns
         -------
@@ -364,26 +386,46 @@ class AsyncYoutubeSearch:
         if query:
             self.__api_key = None
             self.__data.clear()
-            url = f"{BASE_URL}/results?search_query={encode_url(query)}"
-            resp = await self.__session.get(
-                url, cookies=self.__cookies, **self.__requests_kwargs
-            )
-            body = await resp.text()
-        else:
-            if self.__api_key is None:
-                raise ValueError("Last search not found!")
-            url = f"{BASE_URL}/youtubei/v1/search?{self.__api_key}&prettyPrint=false"
-            resp = await self.__session.post(
-                url,
-                cookies=self.__cookies,
-                data=self.json.dumps(self.__data),
-                headers={"content-type": "application/json"},
-                **self.__requests_kwargs,
-            )
-            body = await resp.json(loads=self.json.loads)
-        await resp.release()
-        await self.__get_video(body)
+        if self.__api_key is None and not query:
+            raise ValueError("Last search query not found!")
+        tasks = []
+        for i in range(pages):
+            if i == 0 and query:
+                await self.__search(query, True)  # Get the api key and data first
+                continue
+            tasks.append(self.__search(query))
+        await asyncio.gather(*tasks)
         return self
+
+    async def __search(self, query: str, first: bool = False):
+        """
+        Search wrapper
+
+        Parameters
+        ----------
+        query: str
+            Search query
+        first: bool, default False
+            Is the first time search the query
+        """
+        if first:
+            url = f"{BASE_URL}/results?search_query={encode_url(query)}"
+            async with self.__session.get(
+                url, cookies=self.__cookies, **self.__requests_kwargs
+            ) as resp:
+                body = await resp.text()
+            await self.__get_video(body)
+            return
+        url = f"{BASE_URL}/youtubei/v1/search?{self.__api_key}&prettyPrint=false"
+        async with self.__session.post(
+            url,
+            cookies=self.__cookies,
+            data=self.json.dumps(self.__data),
+            headers={"content-type": "application/json"},
+            **self.__requests_kwargs,
+        ) as resp:
+            body = await resp.json(loads=self.json.loads)
+        await self.__get_video(body)
 
     async def __parse_html(self, response: Union[str, dict]) -> Iterator[list]:
         """
@@ -409,17 +451,14 @@ class AsyncYoutubeSearch:
         end = response.index("};", start) + 1
         json_str = response[start:end]
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            data = await loop.run_in_executor(
-                pool,
-                lambda: self.json.loads(json_str)
-            )
+            data = await loop.run_in_executor(pool, lambda: self.json.loads(json_str))
 
             self.__api_key = await loop.run_in_executor(
                 pool,
                 lambda: re.search(
                     r"(?:\"INNERTUBE_API_KEY\":\")(?P<api_key>[A-Za-z0-9_-]+)(?:\",)",
                     response,
-                )["api_key"]
+                )["api_key"],
             )
             self.__data["context"] = await loop.run_in_executor(
                 pool,
@@ -429,14 +468,14 @@ class AsyncYoutubeSearch:
                         response,
                         re.DOTALL,
                     )["context"]
-                )
+                ),
             )
             self.__data["continuation"] = await loop.run_in_executor(
                 pool,
                 lambda: re.search(
                     r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")",
                     response,
-                )["token"]
+                )["token"],
             )
         return data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"][
             "sectionListRenderer"
