@@ -427,7 +427,7 @@ class AsyncYoutubeSearch:
             body = await resp.json(loads=self.json.loads)
         await self.__get_video(body)
 
-    async def __parse_html(self, response: Union[str, dict]) -> Iterator[list]:
+    def __parse_html(self, response: Union[str, dict]) -> Iterator[list]:
         """
         Parse the html response to get the videos
 
@@ -446,37 +446,25 @@ class AsyncYoutubeSearch:
                 "appendContinuationItemsAction"
             ]["continuationItems"]
 
-        loop = asyncio.get_event_loop()
         start = response.index("ytInitialData") + len("ytInitialData") + 3
         end = response.index("};", start) + 1
         json_str = response[start:end]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            data = await loop.run_in_executor(pool, lambda: self.json.loads(json_str))
-
-            self.__api_key = await loop.run_in_executor(
-                pool,
-                lambda: re.search(
-                    r"(?:\"INNERTUBE_API_KEY\":\")(?P<api_key>[A-Za-z0-9_-]+)(?:\",)",
-                    response,
-                )["api_key"],
-            )
-            self.__data["context"] = await loop.run_in_executor(
-                pool,
-                lambda: self.json.loads(
-                    re.search(
-                        r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.*)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")",
-                        response,
-                        re.DOTALL,
-                    )["context"]
-                ),
-            )
-            self.__data["continuation"] = await loop.run_in_executor(
-                pool,
-                lambda: re.search(
-                    r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")",
-                    response,
-                )["token"],
-            )
+        data = self.json.loads(json_str)
+        self.__api_key = re.search(
+            r"(?:\"INNERTUBE_API_KEY\":\")(?P<api_key>[A-Za-z0-9_-]+)(?:\",)",
+            response,
+        )["api_key"]
+        self.__data["context"] = self.json.loads(
+            re.search(
+                r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.*)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")",
+                response,
+                re.DOTALL,
+            )["context"]
+        )
+        self.__data["continuation"] = re.search(
+            r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")",
+            response,
+        )["token"]
         return data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"][
             "sectionListRenderer"
         ]["contents"]
@@ -490,7 +478,7 @@ class AsyncYoutubeSearch:
         response: Union[str, dict]
             Passed to self.__parse_html function
         """
-        for contents in await self.__parse_html(response):
+        for contents in self.__parse_html(response):
             if "itemSectionRenderer" not in contents:
                 continue
             for video in contents.get("itemSectionRenderer", {}).get("contents", {}):
