@@ -1,33 +1,42 @@
-# youtube_search
+## About
 
-Python module for searching for youtube videos to avoid using their heavily rate-limited API
+Python module for searching youtube videos to avoid using their heavily rate-limited API.
 
 To avoid using the API, this uses the form on the youtube homepage and scrapes the resulting page.
 
-## Example
+## Installation
 
-For a basic search (and all of the current functionality), you can use the search tool as follows:
+_The release on <a href="https://pypi.org/project/youtube-search/">pypi.org</a> is still on v2.1.2. (Not maintained?)_
+1. Clone this repo
+    ```bash
+    git clone --depth 1 https://github.com/XniceCraft/youtube_search
+    ```
 
-```pip install youtube-search```
+2. Install with setup.py
+    ```bash
+    cd youtube_search
+    python3 setup.py install
+    ```
+
+## Quick Usage
 
 ```python
+import asyncio
+import youtube_search
+
 # Synchronous version
-from youtube_search import YoutubeSearch, AsyncYoutubeSearch
+with youtube_search.YoutubeSearch() as ytsearch:
+    ytsearch.search("test")
+    result = ytsearch.list()
 
-search = YoutubeSearch('search terms', max_results=10).fetch()
-results_list = search.list()
-results_json_string = search.json_string()
-print(results_list) # Return inform of list
-print(results_json_string) # Return inform of json string
-
-# Asynchronous version
-async def main():
-    search=await AsyncYoutubeSearch('search terms', max_results=10).fetch()
-    results_list = search.list()
-    results_json_string = search.json_string()
-    print(results_list) # Return inform of list
-    print(results_json_string) # Return inform of json string
-
-asyncio.run(main())
-
+#Asynchronous Version
+async def search_async():
+    async with youtube_search.AsyncYoutubeSearch() as ytsearch:
+        await ytsearch.search("test")
+        result = ytsearch.list()
+asyncio.run(search_async())
 ```
+
+## API
+
+TODO
