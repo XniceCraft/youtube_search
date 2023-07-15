@@ -78,14 +78,14 @@ class BaseFormat:
         return self.__data["itag"]
 
     @property
-    def url(self) -> int:
+    def url(self) -> str:
         """
-        Return itag
+        Return stream url
 
         Returns
         -------
-        int
-            itag
+        str
+            Stream url
         """
         return self.__url
 
@@ -237,26 +237,74 @@ class YoutubeVideo:
 
     @property
     def author(self) -> str:
+        """
+        Return video creator
+
+        Returns
+        -------
+        str
+            YouTube channel name
+        """
         return self._data.get("author")
 
     @property
     def description(self) -> str:
+        """
+        Return video description
+
+        Returns
+        -------
+        str
+            description
+        """
         return self._data.get("description")
 
     @property
     def duration_seconds(self) -> str:
+        """
+        Return video duration in seconds
+
+        Returns
+        -------
+        str
+            Video duration in seconds
+        """
         return self._data.get("duration_seconds")
 
     @property
     def formats(self) -> List[Union[AudioFormat, VideoFormat]]:
+        """
+        Return list of format
+
+        Returns
+        -------
+        List[Union[AudioFormat, VideoFormat]]
+            List of AudioFormat or VideoFormat
+        """
         return self._data.get("formats", [])
 
     @property
     def is_live(self) -> bool:
+        """
+        Return is a live video
+
+        Returns
+        -------
+        bool
+            Is a live video
+        """
         return self._data.get("is_live", False)
 
     @property
     def keywords(self) -> List[str]:
+        """
+        Return keywords
+
+        Returns
+        -------
+        List[str]
+            Keywords
+        """
         return self._data.get("keywords", [])
 
     @property
