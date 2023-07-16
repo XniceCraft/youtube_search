@@ -3,6 +3,12 @@ Module to search videos on youtuve
 """
 #  pylint: disable=line-too-long, too-many-instance-attributes, too-many-arguments
 
+__all__ = [
+    "encode_url",
+    "YoutubeSearch",
+    "AsyncYoutubeSearch"
+]
+
 import asyncio
 import json
 import re

@@ -1,8 +1,19 @@
+"""
+Extract data from YouTube Video
+"""
 import json
 import re
 from typing import List, Union
 import requests
+from .exceptions import InvalidURLError
 
+__all__ = [
+    "BaseFormat",
+    "AudioFormat",
+    "VideoFormat",
+    "YoutubeVideo",
+    "InvalidURLError"
+]
 
 class BaseFormat:
     """
@@ -10,9 +21,14 @@ class BaseFormat:
     """
 
     def __init__(self, data: dict):
-        self.__data = data
+        self.data = data
         #  TODO: Add function to decrypt encrypted url
-        self.__url = requests.utils.unquote(data["url"])
+        self.data["url"] = requests.utils.unquote(data["url"])
+        result = re.search(
+            r"(?:codecs=\")(?P<codecs>.+)(?:\")", self.data["mimeType"]
+        )["codecs"]
+        self.data["codecs"] = [i.strip() for i in result.split(",")]
+        del result
 
     @property
     def average_bitrate(self) -> Union[int, None]:
@@ -24,7 +40,7 @@ class BaseFormat:
         Union[int, None]
             Average bitrate
         """
-        return self.__data.get("averageBitrate")
+        return self.data.get("averageBitrate")
 
     @property
     def bitrate(self) -> Union[int, None]:
@@ -36,7 +52,7 @@ class BaseFormat:
         Union[int, None]
             Bitrate
         """
-        return self.__data.get("bitrate")
+        return self.data.get("bitrate")
 
     @property
     def codecs(self) -> List[str]:
@@ -48,10 +64,7 @@ class BaseFormat:
         List[str]
             List of codec
         """
-        result = re.search(
-            r"(?:codecs=\")(?P<codecs>.+)(?:\")", self.__data["mimeType"]
-        )["codecs"]
-        return [i.strip() for i in result.split(",")]
+        return self.data.get("codecs", [])
 
     @property
     def content_length(self) -> Union[int, None]:
@@ -63,7 +76,7 @@ class BaseFormat:
         Union[int, None]
             Content length
         """
-        return self.__data.get("contentLength")
+        return self.data.get("contentLength")
 
     @property
     def itag(self) -> int:
@@ -75,7 +88,7 @@ class BaseFormat:
         int
             itag
         """
-        return self.__data["itag"]
+        return self.data.get("itag")
 
     @property
     def url(self) -> str:
@@ -87,7 +100,7 @@ class BaseFormat:
         str
             Stream url
         """
-        return self.__url
+        return self.data.get("url")
 
 
 class AudioFormat(BaseFormat):
@@ -97,7 +110,7 @@ class AudioFormat(BaseFormat):
 
     def __init__(self, data: dict):
         super().__init__(data)
-        self.__data = data
+        self.data = data
 
     @property
     def channels(self) -> int:
@@ -109,7 +122,7 @@ class AudioFormat(BaseFormat):
         int
             Audio channels
         """
-        return self.__data["audioChannels"]
+        return self.data["audioChannels"]
 
     @property
     def quality(self) -> str:
@@ -121,7 +134,7 @@ class AudioFormat(BaseFormat):
         str
             Audio quality
         """
-        return self.__data["audioQuality"].replace("AUDIO_QUALITY_", "").title()
+        return self.data["audioQuality"].replace("AUDIO_QUALITY_", "").title()
 
     @property
     def sample_rate(self) -> str:
@@ -133,7 +146,7 @@ class AudioFormat(BaseFormat):
         str
             Audio sample rate
         """
-        return self.__data["audioSampleRate"]
+        return self.data["audioSampleRate"]
 
 
 class VideoFormat(BaseFormat):
@@ -143,7 +156,7 @@ class VideoFormat(BaseFormat):
 
     def __init__(self, data: dict):
         super().__init__(data)
-        self.__data = data
+        self.data = data
 
     @property
     def audio_data(self) -> Union[AudioFormat, None]:
@@ -156,7 +169,7 @@ class VideoFormat(BaseFormat):
         """
         if not self.has_audio():
             return None
-        return AudioFormat(self.__data)
+        return AudioFormat(self.data)
 
     @property
     def fps(self) -> int:
@@ -168,7 +181,7 @@ class VideoFormat(BaseFormat):
         int
             FPS
         """
-        return self.__data["fps"]
+        return self.data.get("fps")
 
     @property
     def quality(self) -> str:
@@ -180,7 +193,7 @@ class VideoFormat(BaseFormat):
         str
             Quality label
         """
-        return self.__data["qualityLabel"]
+        return self.data.get("qualityLabel")
 
     def has_audio(self) -> bool:
         """
@@ -190,7 +203,7 @@ class VideoFormat(BaseFormat):
         -------
         bool
         """
-        return "audioChannels" in self.__data
+        return "audioChannels" in self.data
 
 
 class YoutubeVideo:
@@ -199,6 +212,8 @@ class YoutubeVideo:
     """
 
     def __init__(self, url: str, json_parser=json):
+        if not re.match(r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_-]+)*$", url):
+            raise InvalidURLError(f"{url} isn't valid url")
         self.json = json_parser
         self._url = url
         self._data = {}
@@ -218,11 +233,12 @@ class YoutubeVideo:
         self._data["title"]: str = video_detail.get("title")
         self._data["description"]: str = video_detail.get("shortDescription")
         self._data["thumbnails"]: List[dict] = video_detail.get("thumbnail", {}).get(
-            "thumbnails"
+            "thumbnails",
+            []
         )
         self._data["views"]: str = video_detail.get("viewCount")
         self._data["author"]: str = video_detail.get("author")
-        self._data["keywords"]: List[str] = video_detail.get("keywords")
+        self._data["keywords"]: List[str] = video_detail.get("keywords", [])
         self._data["duration_seconds"]: str = video_detail.get("lengthSeconds", "0")
         self._data["is_live"]: bool = video_detail.get("isLiveContent", False)
         self._data["formats"] = []
@@ -284,6 +300,13 @@ class YoutubeVideo:
         return self._data.get("formats", [])
 
     @property
+    def formats_iter(self):
+        idx = 0
+        while idx < len(self.formats):
+            yield self.formats[idx]
+            idx += 1
+
+    @property
     def is_live(self) -> bool:
         """
         Return is a live video
@@ -308,13 +331,37 @@ class YoutubeVideo:
         return self._data.get("keywords", [])
 
     @property
-    def thumbnails(self) -> List[str]:
+    def thumbnails(self) -> List[dict]:
+        """
+        Return list of thumbnail
+
+        Returns
+        -------
+        List[dict]
+            Thumbnail
+        """
         return self._data.get("thumbnails", [])
 
     @property
     def title(self) -> str:
+        """
+        Return video title
+
+        Returns
+        -------
+        str
+            Title
+        """
         return self._data.get("title")
 
     @property
     def views(self) -> str:
+        """
+        Return video views
+
+        Returns
+        -------
+        str
+            Views
+        """
         return self._data.get("views")
