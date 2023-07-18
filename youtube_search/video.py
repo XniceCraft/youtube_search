@@ -1,8 +1,10 @@
 """
 Extract data from YouTube Video
 """
+import asyncio
 import re
-from typing import Iterator, List, Union
+from typing import Iterator, List, Optional, Union
+import aiohttp
 import requests
 from .exceptions import InvalidURLError
 from .options import Options
@@ -231,7 +233,22 @@ class YoutubeVideo:
     Youtube Video
     """
 
-    def __init__(self, url: str, options: Options = Options()):
+    def __init__(
+        self,
+        url: str,
+        options: Options = Options(),
+        session: Optional[requests.Session] = None
+    ):
+        """
+        Parameters
+        ----------
+        url : str
+            YouTube Video url
+        options : Options
+            youtube_search options
+        session : Optional[requests.Session], default None
+            Requests session
+        """
         if not re.match(
             r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_-]+)*$",
             url,
@@ -240,13 +257,18 @@ class YoutubeVideo:
         self._options = options
         self._url = url
         self._data = {}
-        self.__get_data()
+        self.__session = session
+        self.__send_requests()
 
-    def __get_data(self):
-        resp = requests.get(
-            self._url, timeout=self._options.timeout, proxies=self._options.proxy
-        ).text
+    def __extract_data(self, resp: str) -> None:
+        """
+        Extract data from response body
 
+        Parameters
+        ----------
+        resp : str
+            Response bpdy
+        """
         start = resp.index("ytInitialPlayerResponse = {") + len(
             "ytInitialPlayerResponse = "
         )
@@ -276,6 +298,286 @@ class YoutubeVideo:
                 "type"
             ]
             self._data[f"{stream_type}_formats"].append(stream_map[stream_type](stream))
+
+    def __send_requests(self) -> None:
+        """
+        Send requests and extract data
+        """
+        func = requests.get if self.__session is None else self.__session.get
+        resp = func(
+            self._url, timeout=self._options.timeout, proxies=self._options.proxy
+        ).text
+        self.__extract_data(resp)
+
+    @property
+    def audio_fmts(self) -> List[AudioFormat]:
+        """
+        Return list of audio format
+
+        Returns
+        -------
+        List[AudioFormat]
+        """
+        return self._data.get("audio_formats", [])
+
+    @property
+    def audio_fmts_iter(self) -> Iterator[AudioFormat]:
+        """
+        Return list generator of audio format
+
+        Returns
+        -------
+        Iterator[AudioFormat]
+        """
+        idx = 0
+        while idx < len(self.audio_fmts):
+            yield self.audio_fmts[idx]
+            idx += 1
+
+    @property
+    def author(self) -> str:
+        """
+        Return video creator
+
+        Returns
+        -------
+        str
+            YouTube channel name
+        """
+        return self._data.get("author")
+
+    @property
+    def description(self) -> str:
+        """
+        Return video description
+
+        Returns
+        -------
+        str
+            description
+        """
+        return self._data.get("description")
+
+    @property
+    def duration(self) -> str:
+        """
+        Return video duration
+
+        Returns
+        -------
+        str
+            Video duration in hh:mm:ss fmt
+        """
+        return self._data.get("duration")
+
+    @property
+    def duration_seconds(self) -> str:
+        """
+        Return video duration in seconds
+
+        Returns
+        -------
+        str
+            Video duration in seconds
+        """
+        return self._data.get("duration_seconds")
+
+    @property
+    def formats(self) -> List[Union[AudioFormat, VideoFormat]]:
+        """
+        Return list of audio and video format
+
+        Returns
+        -------
+        List[Union[AudioFormat, VideoFormat]]
+        """
+        return [
+            *self._data.get("video_formats", []),
+            *self._data.get("audio_formats", []),
+        ]
+
+    @property
+    def formats_iter(self) -> Iterator[Union[AudioFormat, VideoFormat]]:
+        """
+        Return list generator of formats
+
+        Returns
+        -------
+        Iterator[Union[AudioFormat, VideoFormat]]
+        """
+        idx = 0
+        while idx < len(self.formats):
+            yield self.formats[idx]
+            idx += 1
+
+    @property
+    def is_live(self) -> bool:
+        """
+        Return is a live video
+
+        Returns
+        -------
+        bool
+            Is a live video
+        """
+        return self._data.get("is_live", False)
+
+    @property
+    def keywords(self) -> List[str]:
+        """
+        Return keywords
+
+        Returns
+        -------
+        List[str]
+            Keywords
+        """
+        return self._data.get("keywords", [])
+
+    @property
+    def thumbnails(self) -> List[dict]:
+        """
+        Return list of thumbnail
+
+        Returns
+        -------
+        List[dict]
+            Thumbnail
+        """
+        return self._data.get("thumbnails", [])
+
+    @property
+    def title(self) -> str:
+        """
+        Return video title
+
+        Returns
+        -------
+        str
+            Title
+        """
+        return self._data.get("title")
+
+    @property
+    def video_fmts(self) -> List[VideoFormat]:
+        """
+        Return list of video format
+
+        Returns
+        -------
+        List[VideoFormat]
+        """
+        return self._data.get("video_formats", [])
+
+    @property
+    def video_fmts_iter(self) -> Iterator[VideoFormat]:
+        """
+        Return list generator of video format
+
+        Returns
+        -------
+        Iterator[VideoFormat]
+        """
+        idx = 0
+        while idx < len(self.video_fmts):
+            yield self.video_fmts[idx]
+            idx += 1
+
+    @property
+    def views(self) -> str:
+        """
+        Return video views
+
+        Returns
+        -------
+        str
+            Views
+        """
+        return self._data.get("views")
+
+class AsyncYoutubeVideo:
+    """
+    Async Youtube Video
+    """
+    async def __init__(
+        self,
+        url: str,
+        options: Options = Options(),
+        session: Optional[aiohttp.ClientSession] = None
+    ):
+        """
+        Parameters
+        ----------
+        url : str
+            YouTube Video url
+        options : Options
+            youtube_search options
+        session : Optional[aiohttp.ClientSession], default None
+            Requests session
+        """
+        if not re.match(
+            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_-]+)*$",
+            url,
+        ):
+            raise InvalidURLError(f"{url} isn't valid url")
+        self._options = options
+        self._url = url
+        self._data = {}
+        self.__session = session
+        await self.__send_requests()
+
+    def __extract_data(self, resp: str) -> None:
+        """
+        Extract data from response body
+
+        Parameters
+        ----------
+        resp : str
+            Response bpdy
+        """
+        start = resp.index("ytInitialPlayerResponse = {") + len(
+            "ytInitialPlayerResponse = "
+        )
+        end = resp.index("};", start) + 1
+        json_str = resp[start:end]
+        data = self._options.json_parser.loads(json_str)
+
+        video_detail = data.get("videoDetails", {})
+        self._data["audio_formats"] = []
+        self._data["author"]: str = video_detail.get("author")
+        self._data["description"]: str = video_detail.get("shortDescription")
+        self._data["duration_seconds"]: str = video_detail.get("lengthSeconds", "0")
+        self._data["duration"]: str = hh_mm_ss_fmt(int(self._data["duration_seconds"]))
+        self._data["is_live"]: bool = video_detail.get("isLiveContent", False)
+        self._data["keywords"]: List[str] = video_detail.get("keywords", [])
+        self._data["title"]: str = video_detail.get("title")
+        self._data["thumbnails"]: List[dict] = video_detail.get("thumbnail", {}).get(
+            "thumbnails", []
+        )
+        self._data["video_formats"] = []
+        self._data["views"]: str = video_detail.get("viewCount")
+        tmp_formats = data.get("streamingData", {}).get("formats", [])
+        tmp_formats.extend(data.get("streamingData", {}).get("adaptiveFormats", []))
+        stream_map = {"video": VideoFormat, "audio": AudioFormat}
+        for stream in tmp_formats:
+            stream_type = re.search(r"(?P<type>\w+)(?:/\w+;)", stream["mimeType"])[
+                "type"
+            ]
+            self._data[f"{stream_type}_formats"].append(stream_map[stream_type](stream))
+
+    async def __send_requests(self) -> None:
+        """
+        Send requests and extract data
+        """
+        session = aiohttp.ClientSession() if self.__session is None else self.__session
+        async with session.get(self._url, timeout=self._options.timeout) as resp:
+            body = await resp.text()
+            self.__extract_data(body)
+        if self.__session is None:
+            await session.close()
+            await asyncio.sleep(
+                0.250
+            )
 
     @property
     def audio_fmts(self) -> List[AudioFormat]:

@@ -1,11 +1,12 @@
 import asyncio
 import time
-from youtube_search import AsyncYoutubeSearch, YoutubeSearch
+from youtube_search import AsyncYoutubeSearch, YoutubeSearch, Options
 
 async def main():
     """Search test"""
     t1=time.perf_counter()
-    async with AsyncYoutubeSearch(language="en-US") as ytsearch:
+    opt = Options(language="en-US")
+    async with AsyncYoutubeSearch(options=opt) as ytsearch:
         await ytsearch.search("test", 5)
         result = ytsearch.list()
         assert isinstance(result, list)
@@ -17,7 +18,7 @@ async def main():
     print(f"Async: {int(t2*1000-t1*1000)} ms")
 
     t3=time.perf_counter()
-    with YoutubeSearch(language="en-US") as ytsearch:
+    with YoutubeSearch(options=opt) as ytsearch:
         ytsearch.search("test", 5)
         result = ytsearch.list()
         assert isinstance(result, list)

@@ -3,23 +3,15 @@ Module to search videos on youtuve
 """
 #  pylint: disable=line-too-long, too-many-instance-attributes, too-many-arguments
 
-__all__ = [
-    "encode_url",
-    "YoutubeSearch",
-    "AsyncYoutubeSearch"
-]
+__all__ = ["encode_url", "YoutubeSearch", "AsyncYoutubeSearch"]
 
 import asyncio
-import json
 import re
 from typing import Iterator, List, Optional, Union
-from platform import system
 from unicodedata import normalize as unicode_normalize
 import requests
 from aiohttp import ClientSession
-
-if system() == "Windows":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+from .options import Options
 
 BASE_URL = "https://www.youtube.com"
 
@@ -48,43 +40,34 @@ class YoutubeSearch:
     def __init__(
         self,
         max_results: Optional[int] = None,
-        language: Optional[str] = None,
-        region: Optional[str] = None,
-        timeout: int = 10,
-        proxy: Optional[dict] = None,
-        json_parser=json,
+        options: Options = Options(),
+        session: Optional[requests.Session] = None,
     ):
         """
         Parameters
         ----------
-        max_results : Union[int, None], default 20
+        max_results : Optional[int], default 20
             The maximum result that will be returned. Set to None to remove the limit
-        language : str, default None
-            Youtube language
-        region : str, default None
-            Youtube region
-        timeout : int
-            Request timeout
-        proxy : Optional[dict]
-            Request proxy
-        json_parser : Module, default json
-            Custom json parser
+        options : Options
+            youtube_search options
+        session : Optional[requests.Session], default None
+            Requests session
         """
         if max_results is not None and max_results < 0:
             raise ValueError(
                 "Max result must be a whole number or set to None to remove the limit"
             )
-        self.json = json_parser
-        requests.models.complexjson = json_parser
+        self.json = options.json_parser
+        requests.models.complexjson = self.json
         self.max_results = max_results
         self.__api_key = None
         self.__cookies = {
-            "PREF": f"hl={language}&gl={region}",
+            "PREF": f"hl={options.language}&gl={options.region}",
             "domain": ".youtube.com",
         }
         self.__data = {}
-        self.__requests_kwargs = {"timeout": timeout, "proxies": proxy}
-        self.__session = requests.Session()
+        self.__requests_kwargs = {"timeout": options.timeout, "proxies": options.proxy}
+        self.__session = requests.Session() if session is None else session
         self.__videos = []
 
     def __enter__(self) -> "YoutubeSearch":
@@ -307,43 +290,34 @@ class AsyncYoutubeSearch:
     def __init__(
         self,
         max_results: Optional[int] = None,
-        language: Optional[str] = None,
-        region: Optional[str] = None,
-        timeout: int = 10,
-        proxy: Optional[dict] = None,
-        json_parser=json,
+        options: Options = Options(),
+        session: Optional[ClientSession] = None,
     ):
         """
         Parameters
         ----------
-        max_results : Union[int, None], default 20
+        max_results : Optional[int], default 20
             The maximum result that will be returned. Set to None to remove the limit
-        language : str, default None
-            Youtube language
-        region : str, default None
-            Youtube region
-        timeout : int
-            Request timeout
-        proxy : Optional[dict]
-            Request proxy
-        json_parser : Module, default json
-            Custom json parser
+        options : Options
+            youtube_search options
+        session : Optional[ClientSession], default None
+            aiohttp client session
         """
         if max_results is not None and max_results < 0:
             raise ValueError(
                 "Max result must be a whole number or set to None to remove the limit"
             )
-        self.json = json_parser
+        self.json = options.json_parser
         self.max_results = max_results
         self.__api_key = None
         self.__cookies = {
-            "PREF": f"hl={language}&gl={region}",
+            "PREF": f"hl={options.language}&gl={options.region}",
         }
         self.__data = {}
-        self.__requests_kwargs = {"timeout": timeout}
-        if isinstance(proxy, dict):
-            self.__requests_kwargs["proxy"] = proxy.get("https", "")
-        self.__session = ClientSession()
+        self.__requests_kwargs = {"timeout": options.timeout}
+        if isinstance(options.proxy, dict):
+            self.__requests_kwargs["proxy"] = options.proxy.get("https", "")
+        self.__session = ClientSession() if session is None else session
         self.__videos = []
 
     async def __aenter__(self) -> "AsyncYoutubeSearch":
