@@ -1,19 +1,39 @@
 """
 Extract data from YouTube Video
 """
-import json
 import re
-from typing import List, Union
+from typing import Iterator, List, Union
 import requests
 from .exceptions import InvalidURLError
+from .options import Options
 
 __all__ = [
     "BaseFormat",
     "AudioFormat",
     "VideoFormat",
     "YoutubeVideo",
-    "InvalidURLError"
+    "InvalidURLError",
 ]
+
+
+def hh_mm_ss_fmt(seconds: int) -> str:
+    """
+    Convert seconds to hh:mm:ss format
+
+    Parameters
+    ----------
+    seconds : int
+        Seconds
+
+    Returns
+    -------
+    str
+        Formatted time
+    """
+    mins, secs = divmod(seconds, 60)
+    hrs, mins = divmod(mins, 60)
+    return f"{hrs}:{mins:02d}:{secs:02d}"
+
 
 class BaseFormat:
     """
@@ -24,9 +44,9 @@ class BaseFormat:
         self.data = data
         #  TODO: Add function to decrypt encrypted url
         self.data["url"] = requests.utils.unquote(data["url"])
-        result = re.search(
-            r"(?:codecs=\")(?P<codecs>.+)(?:\")", self.data["mimeType"]
-        )["codecs"]
+        result = re.search(r"(?:codecs=\")(?P<codecs>.+)(?:\")", self.data["mimeType"])[
+            "codecs"
+        ]
         self.data["codecs"] = [i.strip() for i in result.split(",")]
         del result
 
@@ -211,37 +231,43 @@ class YoutubeVideo:
     Youtube Video
     """
 
-    def __init__(self, url: str, json_parser=json):
-        if not re.match(r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_-]+)*$", url):
+    def __init__(self, url: str, options: Options = Options()):
+        if not re.match(
+            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_-]+)*$",
+            url,
+        ):
             raise InvalidURLError(f"{url} isn't valid url")
-        self.json = json_parser
+        self._options = options
         self._url = url
         self._data = {}
         self.__get_data()
 
     def __get_data(self):
-        resp = requests.get(self._url).text
+        resp = requests.get(
+            self._url, timeout=self._options.timeout, proxies=self._options.proxy
+        ).text
 
         start = resp.index("ytInitialPlayerResponse = {") + len(
             "ytInitialPlayerResponse = "
         )
         end = resp.index("};", start) + 1
         json_str = resp[start:end]
-        data = self.json.loads(json_str)
+        data = self._options.json_parser.loads(json_str)
 
         video_detail = data.get("videoDetails", {})
-        self._data["title"]: str = video_detail.get("title")
-        self._data["description"]: str = video_detail.get("shortDescription")
-        self._data["thumbnails"]: List[dict] = video_detail.get("thumbnail", {}).get(
-            "thumbnails",
-            []
-        )
-        self._data["views"]: str = video_detail.get("viewCount")
+        self._data["audio_formats"] = []
         self._data["author"]: str = video_detail.get("author")
-        self._data["keywords"]: List[str] = video_detail.get("keywords", [])
+        self._data["description"]: str = video_detail.get("shortDescription")
         self._data["duration_seconds"]: str = video_detail.get("lengthSeconds", "0")
+        self._data["duration"]: str = hh_mm_ss_fmt(int(self._data["duration_seconds"]))
         self._data["is_live"]: bool = video_detail.get("isLiveContent", False)
-        self._data["formats"] = []
+        self._data["keywords"]: List[str] = video_detail.get("keywords", [])
+        self._data["title"]: str = video_detail.get("title")
+        self._data["thumbnails"]: List[dict] = video_detail.get("thumbnail", {}).get(
+            "thumbnails", []
+        )
+        self._data["video_formats"] = []
+        self._data["views"]: str = video_detail.get("viewCount")
         tmp_formats = data.get("streamingData", {}).get("formats", [])
         tmp_formats.extend(data.get("streamingData", {}).get("adaptiveFormats", []))
         stream_map = {"video": VideoFormat, "audio": AudioFormat}
@@ -249,7 +275,32 @@ class YoutubeVideo:
             stream_type = re.search(r"(?P<type>\w+)(?:/\w+;)", stream["mimeType"])[
                 "type"
             ]
-            self._data["formats"].append(stream_map[stream_type](stream))
+            self._data[f"{stream_type}_formats"].append(stream_map[stream_type](stream))
+
+    @property
+    def audio_fmts(self) -> List[AudioFormat]:
+        """
+        Return list of audio format
+
+        Returns
+        -------
+        List[AudioFormat]
+        """
+        return self._data.get("audio_formats", [])
+
+    @property
+    def audio_fmts_iter(self) -> Iterator[AudioFormat]:
+        """
+        Return list generator of audio format
+
+        Returns
+        -------
+        Iterator[AudioFormat]
+        """
+        idx = 0
+        while idx < len(self.audio_fmts):
+            yield self.audio_fmts[idx]
+            idx += 1
 
     @property
     def author(self) -> str:
@@ -276,6 +327,18 @@ class YoutubeVideo:
         return self._data.get("description")
 
     @property
+    def duration(self) -> str:
+        """
+        Return video duration
+
+        Returns
+        -------
+        str
+            Video duration in hh:mm:ss fmt
+        """
+        return self._data.get("duration")
+
+    @property
     def duration_seconds(self) -> str:
         """
         Return video duration in seconds
@@ -290,17 +353,26 @@ class YoutubeVideo:
     @property
     def formats(self) -> List[Union[AudioFormat, VideoFormat]]:
         """
-        Return list of format
+        Return list of audio and video format
 
         Returns
         -------
         List[Union[AudioFormat, VideoFormat]]
-            List of AudioFormat or VideoFormat
         """
-        return self._data.get("formats", [])
+        return [
+            *self._data.get("video_formats", []),
+            *self._data.get("audio_formats", []),
+        ]
 
     @property
-    def formats_iter(self):
+    def formats_iter(self) -> Iterator[Union[AudioFormat, VideoFormat]]:
+        """
+        Return list generator of formats
+
+        Returns
+        -------
+        Iterator[Union[AudioFormat, VideoFormat]]
+        """
         idx = 0
         while idx < len(self.formats):
             yield self.formats[idx]
@@ -353,6 +425,31 @@ class YoutubeVideo:
             Title
         """
         return self._data.get("title")
+
+    @property
+    def video_fmts(self) -> List[VideoFormat]:
+        """
+        Return list of video format
+
+        Returns
+        -------
+        List[VideoFormat]
+        """
+        return self._data.get("video_formats", [])
+
+    @property
+    def video_fmts_iter(self) -> Iterator[VideoFormat]:
+        """
+        Return list generator of video format
+
+        Returns
+        -------
+        Iterator[VideoFormat]
+        """
+        idx = 0
+        while idx < len(self.video_fmts):
+            yield self.video_fmts[idx]
+            idx += 1
 
     @property
     def views(self) -> str:
