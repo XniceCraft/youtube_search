@@ -170,9 +170,9 @@ class YoutubeSearch:
             Contains list of video data
         """
         if self.__api_key:
-            return response["onResponseReceivedCommands"][0][
+            return response.get("onResponseReceivedCommands", [{}])[0].get(
                 "appendContinuationItemsAction"
-            ]["continuationItems"]
+            ).get("continuationItems")
 
         start = response.index("ytInitialData") + len("ytInitialData") + 3
         end = response.index("};", start) + 1
@@ -213,6 +213,7 @@ class YoutubeSearch:
             resp = self.__session.get(
                 url, cookies=self.__cookies, **self.__requests_kwargs
             )
+            resp.raise_for_status()
             body = resp.text
             self.__get_video(body)
             return
@@ -223,6 +224,7 @@ class YoutubeSearch:
             data=self.json.dumps(self.__data),
             **self.__requests_kwargs,
         )
+        resp.raise_for_status()
         body = resp.json()
         self.__get_video(body)
 
@@ -420,9 +422,9 @@ class AsyncYoutubeSearch:
             Contains list of video data
         """
         if self.__api_key:
-            return response["onResponseReceivedCommands"][0][
+            return response.get("onResponseReceivedCommands", [{}])[0].get(
                 "appendContinuationItemsAction"
-            ]["continuationItems"]
+            ).get("continuationItems")
 
         start = response.index("ytInitialData") + len("ytInitialData") + 3
         end = response.index("};", start) + 1
@@ -463,6 +465,7 @@ class AsyncYoutubeSearch:
             async with self.__session.get(
                 url, cookies=self.__cookies, **self.__requests_kwargs
             ) as resp:
+                resp.raise_for_status()
                 body = await resp.text()
             await self.__get_video(body)
             return
@@ -474,6 +477,7 @@ class AsyncYoutubeSearch:
             headers={"content-type": "application/json"},
             **self.__requests_kwargs,
         ) as resp:
+            resp.raise_for_status()
             body = await resp.json(loads=self.json.loads)
         await self.__get_video(body)
 
