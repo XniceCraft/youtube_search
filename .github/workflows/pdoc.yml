@@ -20,7 +20,7 @@ jobs:
       - run: |
           pip install -r requirements.txt
           pip install pdoc
-.
+
       - run: pdoc -o docs -d numpy youtube_search
 
       - uses: actions/upload-pages-artifact@v1
