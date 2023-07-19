@@ -1,6 +1,9 @@
 """
 Options for youtube_search
 """
+
+__all__ = ["Options"]
+
 import json
 from dataclasses import dataclass
 from types import ModuleType

@@ -1,8 +1,6 @@
-name: Package test
+name: Test
 
-on:
-  push:
-    branches: [ master , add-feature ]
+on: [push]
 
 permissions:
   contents: read
@@ -10,20 +8,22 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10"]
     steps:
     - uses: actions/checkout@v3
-    - name: Set up Python 3.8
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v3
       with:
-        python-version: "3.8"
+        python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    - name: Check with pylint
-      run: |
         pip install pylint
-        pylint youtube_search/__init__.py -E
+    - name: Check with pylint
+      run: pylint -E $(git ls-files '*.py')
     - name: Install the module
       run: python setup.py install
     - name: Run test

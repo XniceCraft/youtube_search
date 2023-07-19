@@ -14,8 +14,11 @@ __all__ = [
     "BaseFormat",
     "AudioFormat",
     "VideoFormat",
+    "BaseYoutubeVideo",
     "YoutubeVideo",
+    "AsyncYoutubeVideo",
     "InvalidURLError",
+    "hh_mm_ss_fmt",
 ]
 
 
@@ -485,7 +488,7 @@ class YoutubeVideo(BaseYoutubeVideo):
             Requests session
         """
         if not re.match(
-            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_-.]+)*$",
+            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
             url,
         ):
             raise InvalidURLError(f"{url} isn't valid url")
@@ -528,7 +531,7 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
             Requests session
         """
         if not re.match(
-            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_-.]+)*$",
+            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
             url,
         ):
             raise InvalidURLError(f"{url} isn't valid url")
