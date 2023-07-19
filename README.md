@@ -38,5 +38,4 @@ asyncio.run(search_async())
 ```
 
 ## API
-
-TODO
+<a href="https://xnicecraft.github.io/youtube_search/youtube_search.html">Documentation</a>
