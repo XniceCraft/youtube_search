@@ -1,4 +1,4 @@
-__version__ = "3.0.0-alpha"
+__version__ = "3.0.0-beta.1"
 
 import asyncio
 import sys
