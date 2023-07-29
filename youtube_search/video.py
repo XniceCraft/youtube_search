@@ -49,6 +49,8 @@ class BaseFormat:
     def __init__(self, data: dict):
         self.data = data
         #  TODO: Add function to decrypt encrypted url
+        if not "url" in data:
+            raise NotImplementedError("YouTube URL decrypt not implemented")
         self.data["url"] = requests.utils.unquote(data["url"])
         result = re.search(r"(?:codecs=\")(?P<codecs>.+)(?:\")", self.data["mimeType"])[
             "codecs"
@@ -531,7 +533,7 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         options : Options
             youtube_search options
         session : Optional[aiohttp.ClientSession], default None
-            Requests session
+            aiohttp client session
         """
         if not re.match(
             r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
@@ -554,7 +556,7 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         session = aiohttp.ClientSession() if self.__session is None else self.__session
         async with session.get(self._url, timeout=self._options.timeout) as resp:
             body = await resp.text()
-            self._extract_data(body)
         if self.__session is None:
             await session.close()
             await asyncio.sleep(0.250)
+        self._extract_data(body)
