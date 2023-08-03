@@ -2,8 +2,8 @@ __version__ = "3.0.0"
 
 import asyncio
 import sys
-from .search import AsyncYoutubeSearch, YoutubeSearch
-from .video import AsyncYoutubeVideo, YoutubeVideo
+from .search import AsyncYoutubeSearch, BaseYoutubeSearch, YoutubeSearch
+from .video import AsyncYoutubeVideo, BaseYoutubeVideo, YoutubeVideo
 from .options import Options
 
 if sys.platform == "win32":

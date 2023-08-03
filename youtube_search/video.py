@@ -238,6 +238,7 @@ class BaseYoutubeVideo(ABC):
     """
     Base class for youtube video
     """
+
     def __init__(self, data: dict):
         self._data = data
         self._options: Options = None
@@ -494,7 +495,7 @@ class YoutubeVideo(BaseYoutubeVideo):
             url,
         ) and not re.match(
             r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/)(?:shorts/)(?P<shorts_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
-            url
+            url,
         ):
             raise InvalidURLError(f"{url} isn't valid url")
         self._data = {}
@@ -540,7 +541,7 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
             url,
         ) and not re.match(
             r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/)(?:shorts/)(?P<shorts_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
-            url
+            url,
         ):
             raise InvalidURLError(f"{url} isn't valid url")
         self._data = {}
