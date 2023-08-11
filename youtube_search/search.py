@@ -232,6 +232,7 @@ class YoutubeSearch(BaseYoutubeSearch):
         requests.models.complexjson = self.json
         self._requests_kwargs = {"timeout": options.timeout, "proxies": options.proxy}
         self.__session = requests.Session() if session is None else session
+        self.__is_custom_session = bool(session)
 
     def __enter__(self) -> "YoutubeSearch":
         return self
@@ -270,6 +271,16 @@ class YoutubeSearch(BaseYoutubeSearch):
         body = resp.json()
         self._get_video(body)
 
+    @property
+    def is_custom_session(self) -> bool:
+        """
+        Returns
+        -------
+        bool
+            Return True if user using custom session
+        """
+        return self.__is_custom_session
+
     def close(self) -> None:
         """
         Close the context manager
@@ -277,7 +288,8 @@ class YoutubeSearch(BaseYoutubeSearch):
         self._api_key = None
         self._data.clear()
         self._videos.clear()
-        self.__session.close()
+        if not self.is_custom_session:
+            self.__session.close()
 
     def search(self, query: str = None, pages: int = 1) -> "YoutubeSearch":
         """
@@ -335,6 +347,7 @@ class AsyncYoutubeSearch(BaseYoutubeSearch):
         if isinstance(options.proxy, dict):
             self._requests_kwargs["proxy"] = options.proxy.get("https", "")
         self.__session = aiohttp.ClientSession() if session is None else session
+        self.__is_custom_session = bool(session)
 
     async def __aenter__(self) -> "AsyncYoutubeSearch":
         return self
@@ -374,6 +387,16 @@ class AsyncYoutubeSearch(BaseYoutubeSearch):
             body = await resp.json(loads=self.json.loads)
         self._get_video(body)
 
+    @property
+    def is_custom_session(self) -> bool:
+        """
+        Returns
+        -------
+        bool
+            Return True if user using custom session
+        """
+        return self.__is_custom_session
+
     async def close(self) -> None:
         """
         Close the context manager
@@ -381,10 +404,11 @@ class AsyncYoutubeSearch(BaseYoutubeSearch):
         self._api_key = None
         self._data.clear()
         self._videos.clear()
-        await self.__session.close()
-        await asyncio.sleep(
-            0.250
-        )  #  https://docs.aiohttp.org/en/stable/client_advanced.html#graceful-shutdown
+        if not self.is_custom_session:
+            await self.__session.close()
+            await asyncio.sleep(
+                0.250
+            )  #  https://docs.aiohttp.org/en/stable/client_advanced.html#graceful-shutdown
 
     async def search(self, query: str = None, pages: int = 1) -> "AsyncYoutubeSearch":
         """
