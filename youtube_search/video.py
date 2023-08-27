@@ -9,6 +9,7 @@ import aiohttp
 import requests
 from .exceptions import InvalidURLError
 from .options import Options
+from .utils import decrypt_youtube_url
 
 __all__ = [
     "BaseFormat",
@@ -46,12 +47,15 @@ class BaseFormat:
     Base class for youtube format
     """
 
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, video_id: str, player_js: str):
         self.data = data
         #  TODO: Add function to decrypt encrypted url
-        if not "url" in data:
-            raise NotImplementedError("YouTube URL decrypt not implemented")
-        self.data["url"] = requests.utils.unquote(data["url"])
+        # Right now we're using yt-dlp to decrypt youtube signature
+        self.data["url"] = (
+            requests.utils.unquote(data["url"])
+            if "url" in data
+            else decrypt_youtube_url(data["signatureCipher"], video_id, player_js)
+        )
         result = re.search(r"(?:codecs=\")(?P<codecs>.+)(?:\")", self.data["mimeType"])[
             "codecs"
         ]
@@ -136,9 +140,13 @@ class AudioFormat(BaseFormat):
     Contains audio data
     """
 
-    def __init__(self, data: dict):
-        super().__init__(data)
+    def __init__(self, data: dict, *args):
+        super().__init__(data, *args)
         self.data = data
+
+    def __repr__(self):
+        return f"<audio stream, channels={self.channels}, codecs={self.codecs}, itag={self.itag}, quality={self.quality}, sample_rate={self.sample_rate}>"
+
 
     @property
     def channels(self) -> int:
@@ -182,9 +190,12 @@ class VideoFormat(BaseFormat):
     Contains video data
     """
 
-    def __init__(self, data: dict):
-        super().__init__(data)
+    def __init__(self, data: dict, *args):
+        super().__init__(data, *args)
         self.data = data
+
+    def __repr__(self):
+        return f"<video stream, codecs={self.codecs}, fps={self.fps}, itag={self.itag}, quality={self.quality}, has_audio={self.has_audio()}>"
 
     @property
     def audio_data(self) -> Union[AudioFormat, None]:
@@ -272,7 +283,11 @@ class BaseYoutubeVideo(ABC):
             "thumbnails", []
         )
         self._data["video_formats"] = []
+        self._data["video_id"] = video_detail.get("videoId")
         self._data["views"]: str = video_detail.get("viewCount")
+        player_js_start = resp.index('jsUrl":"')
+        player_js_end = resp.index('",', player_js_start)
+        player_js = resp[player_js_start + len('jsUrl":"') : player_js_end]
         tmp_formats = data.get("streamingData", {}).get("formats", [])
         tmp_formats.extend(data.get("streamingData", {}).get("adaptiveFormats", []))
         stream_map = {"video": VideoFormat, "audio": AudioFormat}
@@ -280,7 +295,13 @@ class BaseYoutubeVideo(ABC):
             stream_type = re.search(r"(?P<type>\w+)(?:/\w+;)", stream["mimeType"])[
                 "type"
             ]
-            self._data[f"{stream_type}_formats"].append(stream_map[stream_type](stream))
+            self._data[f"{stream_type}_formats"].append(
+                stream_map[stream_type](
+                    stream,
+                    self._data["video_id"],
+                    f"https://www.youtube.com{player_js}",
+                )
+            )
 
     @property
     def audio_fmts(self) -> List[AudioFormat]:
@@ -455,6 +476,18 @@ class BaseYoutubeVideo(ABC):
         while idx < len(self.video_fmts):
             yield self.video_fmts[idx]
             idx += 1
+
+    @property
+    def video_id(self) -> str:
+        """
+        Return video id
+
+        Returns
+        -------
+        str
+            Video id
+        """
+        return self._data["video_id"]
 
     @property
     def views(self) -> Union[str, None]:

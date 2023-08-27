@@ -26,5 +26,5 @@ setup(
     ],
     packages=["youtube_search"],
     include_package_data=True,
-    install_requires=["aiohttp", "requests"],
+    install_requires=["aiohttp", "requests", "yt-dlp"],
 )
