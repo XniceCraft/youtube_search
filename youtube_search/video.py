@@ -250,8 +250,16 @@ class BaseYoutubeVideo(ABC):
     Base class for youtube video
     """
 
-    def __init__(self, data: dict):
-        self._data = data
+    def __init__(self, url):
+        if not re.match(
+            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
+            url,
+        ) and not re.match(
+            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/)(?:shorts/)(?P<shorts_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
+            url,
+        ):
+            raise InvalidURLError(f"{url} isn't valid url")
+        self._data = {}
         self._options: Options = None
 
     def _extract_data(self, resp: str) -> None:
@@ -523,16 +531,7 @@ class YoutubeVideo(BaseYoutubeVideo):
         session : Optional[requests.Session], default None
             Requests session
         """
-        if not re.match(
-            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
-            url,
-        ) and not re.match(
-            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/)(?:shorts/)(?P<shorts_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
-            url,
-        ):
-            raise InvalidURLError(f"{url} isn't valid url")
-        self._data = {}
-        super().__init__(self._data)
+        super().__init__(url)
         self._options = options
         self._url = url
         self.__session = session
@@ -569,16 +568,7 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         session : Optional[aiohttp.ClientSession], default None
             aiohttp client session
         """
-        if not re.match(
-            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
-            url,
-        ) and not re.match(
-            r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/)(?:shorts/)(?P<shorts_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
-            url,
-        ):
-            raise InvalidURLError(f"{url} isn't valid url")
-        self._data = {}
-        super().__init__(self._data)
+        super().__init__(url)
         self._options = options
         self._url = url
         self.__session = session
