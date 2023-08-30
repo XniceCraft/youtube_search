@@ -5,6 +5,7 @@ import asyncio
 import re
 from abc import ABC
 from typing import Iterator, List, Optional, Union
+from urllib.parse import unquote as url_decode
 import aiohttp
 import requests
 from .exceptions import InvalidURLError
@@ -147,7 +148,6 @@ class AudioFormat(BaseFormat):
     def __repr__(self):
         return f"<audio stream, channels={self.channels}, codecs={self.codecs}, itag={self.itag}, quality={self.quality}, sample_rate={self.sample_rate}>"
 
-
     @property
     def channels(self) -> int:
         """
@@ -284,6 +284,7 @@ class BaseYoutubeVideo(ABC):
         self._data["description"]: str = video_detail.get("shortDescription")
         self._data["duration_seconds"]: str = video_detail.get("lengthSeconds", "0")
         self._data["duration"]: str = hh_mm_ss_fmt(int(self._data["duration_seconds"]))
+        self._data["hls_stream"] = None
         self._data["is_live"]: bool = video_detail.get("isLiveContent", False)
         self._data["keywords"]: List[str] = video_detail.get("keywords", [])
         self._data["title"]: str = video_detail.get("title")
@@ -309,6 +310,11 @@ class BaseYoutubeVideo(ABC):
                     self._data["video_id"],
                     f"https://www.youtube.com{player_js}",
                 )
+            )
+
+        if self.is_live:
+            self._data["hls_stream"] = url_decode(
+                data.get("streamingData", {}).get("hlsManifestUrl")
             )
 
     @property
@@ -411,6 +417,18 @@ class BaseYoutubeVideo(ABC):
         while idx < len(self.formats):
             yield self.formats[idx]
             idx += 1
+
+    @property
+    def hls_stream(self) -> Union[str, None]:
+        """
+        Return HLS stream url
+
+        Returns
+        -------
+        Union[str, None]
+            HLS stream url
+        """
+        return self._data["hls_stream"]
 
     @property
     def is_live(self) -> bool:
