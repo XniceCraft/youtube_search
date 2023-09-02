@@ -1,3 +1,4 @@
+#  pylint: disable=line-too-long
 """
 Extract data from YouTube Video
 """
@@ -41,6 +42,113 @@ def hh_mm_ss_fmt(seconds: int) -> str:
     mins, secs = divmod(seconds, 60)
     hrs, mins = divmod(mins, 60)
     return f"{hrs}:{mins:02d}:{secs:02d}"
+
+
+def parse_m3u8(content: str) -> list:
+    """
+    Parse m3u8
+
+    Parameters
+    ----------
+    content : str
+        m3u8 content
+
+    Returns
+    -------
+    list
+        List of HLS formats
+    """
+    formats = []
+    splitted = content.splitlines()
+    for idx, line in enumerate(splitted):
+        if line.startswith("#EXT-X-STREAM-INF:"):
+            regex = re.search(
+                r'(?:#EXT-X-STREAM-INF\:BANDWIDTH=)(?P<bandwidth>\d+)(?:,CODECS=")(?P<codecs>[A-Za-z0-9.,]+)(?:",RESOLUTION=)(?P<resolution>\d+x\d+)(?:,FRAME-RATE=)(?P<fps>\d+)',
+                line,
+            )
+            url = splitted[idx + 1]
+            formats.append(
+                HLSFormat(
+                    {
+                        "bandwidth": int(regex["bandwidth"]),
+                        "codecs": regex["codecs"].split(","),
+                        "fps": int(regex["fps"]),
+                        "resolution": regex["resolution"],
+                    },
+                    url,
+                )
+            )
+    return formats
+
+
+class HLSFormat:
+    """
+    HLS Format
+    """
+
+    def __init__(self, data: dict, url: str):
+        self.__data = data
+        self.__url = url
+
+    @property
+    def bandwidth(self) -> int:
+        """
+        Return stream bandwidth
+
+        Returns
+        -------
+        int
+            Bandwidth
+        """
+        return self.__data["bandwidth"]
+
+    @property
+    def codecs(self) -> list:
+        """
+        Return list of codecs
+
+        Returns
+        -------
+        list
+            Codecs
+        """
+        return self.__data["codecs"]
+
+    @property
+    def fps(self) -> int:
+        """
+        Return stream fps
+
+        Returns
+        -------
+        int
+            FPS
+        """
+        return self.__data["fps"]
+
+    @property
+    def resolution(self) -> str:
+        """
+        Return stream resolution (WxH)
+
+        Returns
+        -------
+        str
+            Resolution
+        """
+        return self.__data["resolution"]
+
+    @property
+    def url(self) -> str:
+        """
+        Return stream m3u8 url
+
+        Returns
+        -------
+        str
+            Stream url
+        """
+        return self.__url
 
 
 class BaseFormat:
@@ -250,7 +358,7 @@ class BaseYoutubeVideo(ABC):
     Base class for youtube video
     """
 
-    def __init__(self, url):
+    def __init__(self, url: str, data: dict):
         if not re.match(
             r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
             url,
@@ -259,10 +367,10 @@ class BaseYoutubeVideo(ABC):
             url,
         ):
             raise InvalidURLError(f"{url} isn't valid url")
-        self._data = {}
+        self._data = data
         self._options: Options = None
 
-    def _extract_data(self, resp: str) -> None:
+    def _extract_data(self, resp: str) -> Union[str, None]:
         """
         Extract data from response body
 
@@ -284,7 +392,7 @@ class BaseYoutubeVideo(ABC):
         self._data["description"]: str = video_detail.get("shortDescription")
         self._data["duration_seconds"]: str = video_detail.get("lengthSeconds", "0")
         self._data["duration"]: str = hh_mm_ss_fmt(int(self._data["duration_seconds"]))
-        self._data["hls_stream"] = None
+        self._data["hls_formats"] = []
         self._data["is_live"]: bool = video_detail.get("isLiveContent", False)
         self._data["keywords"]: List[str] = video_detail.get("keywords", [])
         self._data["title"]: str = video_detail.get("title")
@@ -313,9 +421,8 @@ class BaseYoutubeVideo(ABC):
             )
 
         if self.is_live:
-            self._data["hls_stream"] = url_decode(
-                data.get("streamingData", {}).get("hlsManifestUrl")
-            )
+            return url_decode(data.get("streamingData", {}).get("hlsManifestUrl"))
+        return None
 
     @property
     def audio_fmts(self) -> List[AudioFormat]:
@@ -419,7 +526,7 @@ class BaseYoutubeVideo(ABC):
             idx += 1
 
     @property
-    def hls_stream(self) -> Union[str, None]:
+    def hls_formats(self) -> Union[str, None]:
         """
         Return HLS stream url
 
@@ -428,7 +535,7 @@ class BaseYoutubeVideo(ABC):
         Union[str, None]
             HLS stream url
         """
-        return self._data["hls_stream"]
+        return self._data["hls_formats"]
 
     @property
     def is_live(self) -> bool:
@@ -549,7 +656,8 @@ class YoutubeVideo(BaseYoutubeVideo):
         session : Optional[requests.Session], default None
             Requests session
         """
-        super().__init__(url)
+        self._data = {}
+        super().__init__(url, self._data)
         self._options = options
         self._url = url
         self.__session = session
@@ -562,7 +670,12 @@ class YoutubeVideo(BaseYoutubeVideo):
         resp = func(
             self._url, timeout=self._options.timeout, proxies=self._options.proxy
         ).text
-        self._extract_data(resp)
+        result = self._extract_data(resp)
+        if result is not None:
+            resp = func(
+                result, timeout=self._options.timeout, proxies=self._options.proxy
+            ).text
+            self._data["hls_formats"] = parse_m3u8(resp)
 
 
 class AsyncYoutubeVideo(BaseYoutubeVideo):
@@ -586,7 +699,8 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         session : Optional[aiohttp.ClientSession], default None
             aiohttp client session
         """
-        super().__init__(url)
+        self._data = {}
+        super().__init__(url, self._data)
         self._options = options
         self._url = url
         self.__session = session
@@ -598,7 +712,11 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         session = aiohttp.ClientSession() if self.__session is None else self.__session
         async with session.get(self._url, timeout=self._options.timeout) as resp:
             body = await resp.text()
+        result = self._extract_data(body)
+        if result is not None:
+            async with session.get(result, timeout=self._options.timeout) as resp:
+                body = await resp.text()
+            self._data["hls_formats"] = parse_m3u8(body)
         if self.__session is None:
             await session.close()
             await asyncio.sleep(0.250)
-        self._extract_data(body)
