@@ -2,6 +2,7 @@ __version__ = "3.0.3-beta.1"
 
 import asyncio
 import sys
+from .playlist import AsyncYoutubePlaylist, BaseYoutubePlaylist, YoutubePlaylist
 from .search import AsyncYoutubeSearch, BaseYoutubeSearch, YoutubeSearch
 from .video import AsyncYoutubeVideo, BaseYoutubeVideo, YoutubeVideo
 from .options import Options

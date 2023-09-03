@@ -4,7 +4,6 @@ Extract data from YouTube Video
 """
 import asyncio
 import re
-from abc import ABC
 from typing import Iterator, List, Optional, Union
 from urllib.parse import unquote as url_decode
 import aiohttp
@@ -353,7 +352,7 @@ class VideoFormat(BaseFormat):
         return "audioChannels" in self.data
 
 
-class BaseYoutubeVideo(ABC):
+class BaseYoutubeVideo:
     """
     Base class for youtube video
     """
@@ -662,7 +661,7 @@ class YoutubeVideo(BaseYoutubeVideo):
         self._url = url
         self.__session = session
 
-    def fetch(self) -> None:
+    def fetch(self) -> "YoutubeVideo":
         """
         Send requests and extract data
         """
@@ -676,6 +675,7 @@ class YoutubeVideo(BaseYoutubeVideo):
                 result, timeout=self._options.timeout, proxies=self._options.proxy
             ).text
             self._data["hls_formats"] = parse_m3u8(resp)
+        return self
 
 
 class AsyncYoutubeVideo(BaseYoutubeVideo):
@@ -705,7 +705,7 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         self._url = url
         self.__session = session
 
-    async def fetch(self) -> None:
+    async def fetch(self) -> "AsyncYoutubeVideo":
         """
         Send requests and extract data
         """
@@ -720,3 +720,4 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         if self.__session is None:
             await session.close()
             await asyncio.sleep(0.250)
+        return self
