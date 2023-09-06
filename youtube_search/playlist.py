@@ -14,44 +14,108 @@ from .video import AsyncYoutubeVideo, YoutubeVideo
 
 
 class VideoPreview:
+    """
+    Video Preview
+    """
+
     def __init__(self, data: dict, options: Options):
         self._data = data
         self.__youtube_video = None
         self.__options = options
 
     @property
-    def duration_string(self) -> str:
-        return self._data["duration_string"]
+    def duration(self) -> Union[str, None]:
+        """
+        Return video duration
+
+        Returns
+        -------
+        Union[str, None]
+            Video duration in hh:mm:ss format
+        """
+        return self._data["duration"]
 
     @property
-    def thumbnails(self) -> str:
+    def thumbnails(self) -> List[dict]:
+        """
+        Return list of video thumbnails
+
+        Returns
+        -------
+        List[dict]
+            Video thumbnails
+        """
         return self._data["thumbnails"]
 
     @property
     def title(self) -> str:
+        """
+        Return video title
+
+        Returns
+        -------
+        str
+            Video title
+        """
         return self._data["title"]
 
     @property
     def video_id(self) -> str:
+        """
+        Return video id
+
+        Returns
+        -------
+        str
+            Video id
+        """
         return self._data["video_id"]
 
     def load(self, session: Optional[requests.Session] = None) -> YoutubeVideo:
+        """
+        Load the video
+
+        Parameters
+        ----------
+        session : Optional[requests.Session]
+            User defined session, by default None
+
+        Returns
+        -------
+        YoutubeVideo
+            YoutubeVideo object
+        """
         if not isinstance(self.__youtube_video, YoutubeVideo):
             self.__youtube_video = YoutubeVideo(
                 f"https://www.youtube.com/watch?v={self.video_id}",
                 self.__options,
                 session,
+                skip_url_check=True,
             ).fetch()
         return self.__youtube_video
 
     async def load_async(
         self, session: Optional[aiohttp.ClientSession] = None
     ) -> AsyncYoutubeVideo:
+        """
+        Load the video in async way
+
+        Parameters
+        ----------
+        session : Optional[aiohttp.ClientSession]
+            Client defined session, by default None
+
+        Returns
+        -------
+        AsyncYoutubeVideo
+            AsyncYoutubeVideo object
+        """
         if not isinstance(self.__youtube_video, AsyncYoutubeVideo):
             self.__youtube_video = await AsyncYoutubeVideo(
                 f"https://www.youtube.com/watch?v={self.video_id}",
                 self.__options,
                 session,
+                skip_url_check=True,
             ).fetch()
         return self.__youtube_video
 
@@ -61,9 +125,8 @@ class BaseYoutubePlaylist:
     Base class for YoutubePlaylist
     """
 
-    def __init__(self, data: dict, url: str, skip_url_check: bool):
-        """_summary_
-
+    def __init__(self, url: str, skip_url_check: bool):
+        """
         Parameters
         ----------
         url : str
@@ -76,7 +139,7 @@ class BaseYoutubePlaylist:
         InvalidURLError
             Raised if the URL doesn't match any regex pattern
         """
-        self._data = data
+        self._data: dict = None
         self._options: Options = None
         if skip_url_check:
             return
@@ -195,45 +258,117 @@ class BaseYoutubePlaylist:
         self._data["views"] = int(re.match(r"(?P<views>\d+)", views)["views"])
 
     @property
-    def author_name(self) -> Union[str, None]:
+    def author_name(self) -> str:
+        """
+        Return playlist author name
+
+        Returns
+        -------
+        str
+            Playlist author name
+        """
         return self._data["author_name"]
 
     @property
     def author_url(self) -> str:
+        """
+        Return playlist author channel URL
+
+        Returns
+        -------
+        str
+            Playlist author channel URL
+        """
         return self._data["author_url"]
 
     @property
     def description(self) -> Union[str, None]:
+        """
+        Return playlist description
+
+        Returns
+        -------
+        Union[str, None]
+            Playlist description
+        """
         return self._data["description"]
 
     @property
-    def id(self) -> Union[str, None]:
+    def id(self) -> str:
+        """
+        Return playlist id
+
+        Returns
+        -------
+        str
+            Playlist id
+        """
         return self._data["id"]
 
     @property
-    def title(self) -> Union[str, None]:
+    def title(self) -> str:
+        """
+        Return playlist title
+
+        Returns
+        -------
+        str
+            Playlist title
+        """
         return self._data["title"]
 
     @property
     def thumbnails(self) -> List[dict]:
+        """
+        Return playlist thumbnails
+
+        Returns
+        -------
+        List[dict]
+            Playlist thumbnails
+        """
         return self._data["thumbnails"]
 
     @property
     def video_count(self) -> int:
+        """
+        Return playlist video count
+
+        Returns
+        -------
+        int
+            Playlist video count
+        """
         return self._data["video_count"]
 
     @property
     def videos(self) -> List[Union[VideoPreview, YoutubeVideo, AsyncYoutubeVideo]]:
+        """
+        Return video in playlist
+
+        Returns
+        -------
+        List[Union[VideoPreview, YoutubeVideo, AsyncYoutubeVideo]]
+            Video in playlist
+        """
         return self._data["videos"]
 
     @property
     def views(self) -> int:
+        """
+        Return playlist views
+
+        Returns
+        -------
+        int
+            Playlist views
+        """
         return self._data["views"]
 
 
 class YoutubePlaylist(BaseYoutubePlaylist):
     """
-    youtube playlist
+    Youtube playlist
     """
 
     def __init__(
@@ -255,8 +390,8 @@ class YoutubePlaylist(BaseYoutubePlaylist):
         skip_url_check : bool, optional
             Youtube URL check, by default False
         """
+        super().__init__(url, skip_url_check)
         self._data = {}
-        super().__init__(self._data, url, skip_url_check)
         self._options = options
         self._url = url
         self._session = session
@@ -271,7 +406,15 @@ class YoutubePlaylist(BaseYoutubePlaylist):
         ).text
         self._extract_data(resp)
 
-    def load_all_video(self, session: Optional[requests.Session] = None):
+    def load_all_video(self, session: Optional[requests.Session] = None) -> None:
+        """
+        Load and extract data all video in playlist
+
+        Parameters
+        ----------
+        session: Optional[requests.Session]
+            User defined session
+        """
         session = requests.Session() if self._session is None else self._session
         self._data["videos"] = [video.load(session) for video in self.videos]
         if self._session is None:
@@ -302,8 +445,8 @@ class AsyncYoutubePlaylist(BaseYoutubePlaylist):
         skip_url_check : bool, optional
             Youtube URL check, by default False
         """
+        super().__init__(url, skip_url_check)
         self._data = {}
-        super().__init__(self._data, url, skip_url_check)
         self._options = options
         self._url = url
         self._session = session
@@ -321,6 +464,14 @@ class AsyncYoutubePlaylist(BaseYoutubePlaylist):
         self._extract_data(body)
 
     async def load_all_video(self, session: Optional[aiohttp.ClientSession] = None):
+        """
+        Load and extract data all video in playlist
+
+        Parameters
+        ----------
+        session: Optional[aiohttp.ClientSession]
+            User defined session
+        """
         session = aiohttp.ClientSession() if self._session is None else self._session
         self._data["videos"] = await asyncio.gather(
             *[video.load_async(session) for video in self.videos]

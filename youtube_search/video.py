@@ -357,7 +357,24 @@ class BaseYoutubeVideo:
     Base class for youtube video
     """
 
-    def __init__(self, url: str, data: dict):
+    def __init__(self, url: str, skip_url_check: bool):
+        """
+        Parameters
+        ----------
+        url : str
+            Youtube video URL
+        skip_url_check : bool
+            Youtube URL check
+
+        Raises
+        ------
+        InvalidURLError
+            Raised if URL doesn't match any regex pattern
+        """
+        self._data: dict = None
+        self._options: Options = None
+        if skip_url_check:
+            return
         if not re.match(
             r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:watch|v|embed|live)(?:\?v=|/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$",
             url,
@@ -366,8 +383,6 @@ class BaseYoutubeVideo:
             url,
         ):
             raise InvalidURLError(f"{url} isn't valid url")
-        self._data = data
-        self._options: Options = None
 
     def _extract_data(self, resp: str) -> Union[str, None]:
         """
@@ -644,6 +659,7 @@ class YoutubeVideo(BaseYoutubeVideo):
         url: str,
         options: Options = Options(),
         session: Optional[requests.Session] = None,
+        skip_url_check: bool = False,
     ):
         """
         Parameters
@@ -654,9 +670,11 @@ class YoutubeVideo(BaseYoutubeVideo):
             youtube_search options
         session : Optional[requests.Session], default None
             Requests session
+        skip_url_check : bool, optional
+            Youtube URL check, by default False
         """
+        super().__init__(url, skip_url_check)
         self._data = {}
-        super().__init__(url, self._data)
         self._options = options
         self._url = url
         self.__session = session
@@ -688,6 +706,7 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         url: str,
         options: Options = Options(),
         session: Optional[aiohttp.ClientSession] = None,
+        skip_url_check: bool = False,
     ):
         """
         Parameters
@@ -697,10 +716,12 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
         options : Options
             youtube_search options
         session : Optional[aiohttp.ClientSession], default None
-            aiohttp client session
+            User defined client session
+        skip_url_check : bool, optional
+            Youtube URL check, by default False
         """
+        super().__init__(url, skip_url_check)
         self._data = {}
-        super().__init__(url, self._data)
         self._options = options
         self._url = url
         self.__session = session
