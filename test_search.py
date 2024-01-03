@@ -1,13 +1,24 @@
+"""
+Test for youtube_search
+"""
+
 import asyncio
 import time
-from youtube_search import AsyncYoutubeSearch, YoutubeSearch, Options
+
+import aiohttp
+import requests
+from youtube_search import AsyncYoutubeVideo, YoutubeVideo, AsyncYoutubeSearch, YoutubeSearch, Options
 
 
 async def main():
     """Search test"""
-    t1 = time.perf_counter()
+    req_session = requests.Session()
+    aiohttp_session = aiohttp.ClientSession()
     opt = Options(language="en-US")
-    async with AsyncYoutubeSearch(options=opt) as ytsearch:
+
+    print("== Search Test ==")
+    search_time1= time.perf_counter()
+    async with AsyncYoutubeSearch(options=opt, session=aiohttp_session) as ytsearch:
         await ytsearch.search("test", 5)
         result = ytsearch.list()
         assert isinstance(result, list)
@@ -15,11 +26,11 @@ async def main():
         await ytsearch.search("mrbeast", 3)
         result = ytsearch.list()
         assert isinstance(result, list)
-    t2 = time.perf_counter()
-    print(f"Async: {int(t2*1000-t1*1000)} ms")
+    search_time2 = time.perf_counter()
+    print(f"Async: {int(search_time2*1000-search_time1*1000)} ms")
 
-    t3 = time.perf_counter()
-    with YoutubeSearch(options=opt) as ytsearch:
+    search_time3 = time.perf_counter()
+    with YoutubeSearch(options=opt, session=req_session) as ytsearch:
         ytsearch.search("test", 5)
         result = ytsearch.list()
         assert isinstance(result, list)
@@ -27,8 +38,11 @@ async def main():
         ytsearch.search("mrbeast", 3)
         result = ytsearch.list()
         assert isinstance(result, list)
-    t4 = time.perf_counter()
-    print(f"Sync: {int(t4*1000-t3*1000)} ms")
+    search_time4 = time.perf_counter()
+    print(f"Sync: {int(search_time4*1000-search_time3*1000)} ms")
 
+    print("== Video Test ==")
+    await AsyncYoutubeVideo("https://www.youtube.com/watch?v=jNQXAC9IVRw", options=opt, session=aiohttp_session).fetch()
+    YoutubeVideo("https://www.youtube.com/watch?v=jNQXAC9IVRw", options=opt, session=req_session).fetch()
 
 asyncio.run(main())

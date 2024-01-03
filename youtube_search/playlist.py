@@ -8,9 +8,11 @@ import re
 from typing import List, Optional, Union
 import aiohttp
 import requests
-from .exceptions import InvalidURLError
+from .exceptions import InvalidURLError, ParserFailedError
 from .options import Options
 from .video import AsyncYoutubeVideo, YoutubeVideo
+
+__all__ = ["YoutubePlaylist", "AsyncYoutubePlaylist", "VideoPreview"]
 
 
 class VideoPreview:
@@ -158,8 +160,13 @@ class BaseYoutubePlaylist:
         resp_body : str
             HTML reponse
         """
-        json_str_start = resp_body.index("ytInitialData = {") + len("ytInitialData = ")
-        json_str_end = resp_body.index("};", json_str_start) + 1
+        try:
+            json_str_start = resp_body.index("ytInitialData = {") + len(
+                "ytInitialData = "
+            )
+            json_str_end = resp_body.index("};", json_str_start) + 1
+        except ValueError as err:
+            raise ParserFailedError from err
         json_str = resp_body[json_str_start:json_str_end]
         json_data = self._options.json_parser.loads(json_str)
         del json_str
