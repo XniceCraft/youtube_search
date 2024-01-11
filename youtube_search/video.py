@@ -1,13 +1,16 @@
 #  pylint: disable=line-too-long
 """
-Extract data from YouTube Video
+YouTube Video Abstraction
 """
 import asyncio
 import re
+from dataclasses import dataclass
 from typing import Iterator, List, Optional, Union
 from urllib.parse import unquote as url_decode
+
 import aiohttp
 import requests
+
 from .exceptions import InvalidURLError
 from .options import Options
 from .utils import decrypt_youtube_url
@@ -16,8 +19,6 @@ __all__ = [
     "AudioFormat",
     "VideoFormat",
     "HLSFormat",
-    "YoutubeVideo",
-    "AsyncYoutubeVideo",
 ]
 
 
@@ -37,7 +38,7 @@ def hh_mm_ss_fmt(seconds: int) -> str:
     """
     mins, secs = divmod(seconds, 60)
     hrs, mins = divmod(mins, 60)
-    return f"{hrs}:{mins:02d}:{secs:02d}"
+    return f"{f'{hrs}:' if hrs else ''}{mins:02d}:{secs:02d}"
 
 
 def parse_m3u8(content: str) -> list:
@@ -76,76 +77,16 @@ def parse_m3u8(content: str) -> list:
             )
     return formats
 
-
+@dataclass
 class HLSFormat:
     """
     HLS Format
     """
-
-    def __init__(self, data: dict, url: str):
-        self.__data = data
-        self.__url = url
-
-    @property
-    def bandwidth(self) -> int:
-        """
-        Return stream bandwidth
-
-        Returns
-        -------
-        int
-            Bandwidth
-        """
-        return self.__data["bandwidth"]
-
-    @property
-    def codecs(self) -> list:
-        """
-        Return list of codecs
-
-        Returns
-        -------
-        list
-            Codecs
-        """
-        return self.__data["codecs"]
-
-    @property
-    def fps(self) -> int:
-        """
-        Return stream fps
-
-        Returns
-        -------
-        int
-            FPS
-        """
-        return self.__data["fps"]
-
-    @property
-    def resolution(self) -> str:
-        """
-        Return stream resolution (WxH)
-
-        Returns
-        -------
-        str
-            Resolution
-        """
-        return self.__data["resolution"]
-
-    @property
-    def url(self) -> str:
-        """
-        Return stream m3u8 url
-
-        Returns
-        -------
-        str
-            Stream url
-        """
-        return self.__url
-
+    bandwidth: str
+    codecs: List[str]
+    fps: int
+    resolution: str # WxH format
+    url: str
 
 class BaseFormat:
     """
@@ -739,3 +680,4 @@ class AsyncYoutubeVideo(BaseYoutubeVideo):
             await session.close()
             await asyncio.sleep(0.250)
         return self
+

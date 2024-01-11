@@ -2,10 +2,11 @@ __version__ = "3.1.0-beta.2"
 
 import asyncio
 import sys
-from .playlist import AsyncYoutubePlaylist, BaseYoutubePlaylist, YoutubePlaylist
-from .search import AsyncYoutubeSearch, BaseYoutubeSearch, YoutubeSearch
-from .video import AsyncYoutubeVideo, BaseYoutubeVideo, YoutubeVideo
-from .options import Options
+#from .playlist import AsyncYoutubePlaylist, BaseYoutubePlaylist, YoutubePlaylist
+#from .search import AsyncYoutubeSearch, BaseYoutubeSearch, YoutubeSearch
+#from .video import AsyncYoutubeVideo, BaseYoutubeVideo, YoutubeVideo
+#from .options import Options
+from .youtube import YouTube
 
 if sys.platform == "win32": # Workaround for Windows
     if sys.version_info.major == 3 and sys.version_info.minor >= 8:
