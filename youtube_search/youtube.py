@@ -1,20 +1,27 @@
 import json
 import re
 import urllib.parse
-from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, List, Optional, TypedDict, Union
 from unicodedata import normalize as unicode_normalize
+from urllib.parse import unquote
 
 import aiohttp
 import requests
 
+from .utils import hh_mm_ss_fmt
+from .video import VideoFormat, AudioFormat, VideoData
+
 BASE_URL = "https://www.youtube.com"
+YOUTUBE_VIDEO_REGEX = re.compile(
+    r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:(?:watch|v|embed|live)(?:\?v=|/)|shorts/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$"
+)
 
 ClientSessionDict = TypedDict(
     "ClientSessionDict",
     {"async": Optional[aiohttp.ClientSession], "sync": Optional[requests.Session]},
 )
+
 
 # Search
 class SearchData(TypedDict):
@@ -78,49 +85,6 @@ class SearchResult:
         self.result = []
         return cpy
 
-# Video
-@dataclass(eq=False)
-class VideoData:
-    audio_fmts: List[Optional[AudioFormat]]
-    author: str
-    description: str
-    duration_seconds: str
-    duration: str
-    hls_fmts: List[Optional[HLSFormat]]
-    id: str
-    title: str
-    thumbnails: List[str]
-    video_fmts: List[Optional[VideoFormat]]
-    views: str
-
-    @property
-    def formats(self) -> List[Union[AudioFormat, VideoFormat]]:
-        """
-        Return list of audio and video format
-
-        Returns
-        -------
-        List[Union[AudioFormat, VideoFormat]]
-        """
-        return [
-            *self.audio_fmts,
-            *self.video_fmts,
-        ]
-
-    @property
-    def formats_iter(self) -> Iterator[Union[AudioFormat, VideoFormat]]:
-        """
-        Return list generator of formats
-
-        Returns
-        -------
-        Iterator[Union[AudioFormat, VideoFormat]]
-        """
-        idx = 0
-        while idx < len(self.formats):
-            yield self.formats[idx]
-            idx += 1
-
 class YouTube:
     def __init__(
         self,
@@ -150,49 +114,53 @@ class YouTube:
         resp : str
             Response body
         """
-        start = resp.index("ytInitialPlayerResponse = {") + len(
+        start = body.index("ytInitialPlayerResponse = {") + len(
             "ytInitialPlayerResponse = "
         )
-        end = resp.index("};", start) + 1
-        json_str = resp[start:end]
+        end = body.index("};", start) + 1
+        json_str = body[start:end]
         data = self.json.loads(json_str)
 
         video_detail = data.get("videoDetails", {})
-        self._data["audio_formats"] = []
-        self._data["author"]: str = video_detail.get("author")
-        self._data["description"]: str = video_detail.get("shortDescription")
-        self._data["duration_seconds"]: str = video_detail.get("lengthSeconds", "0")
-        self._data["duration"]: str = hh_mm_ss_fmt(int(self._data["duration_seconds"]))
-        self._data["hls_formats"] = []
-        self._data["is_live"]: bool = video_detail.get("isLiveContent", False)
-        self._data["keywords"]: List[str] = video_detail.get("keywords", [])
-        self._data["title"]: str = video_detail.get("title")
-        self._data["thumbnails"]: List[dict] = video_detail.get("thumbnail", {}).get(
-            "thumbnails", []
+        result = VideoData(
+            audio_fmts=None,
+            author=video_detail.get("author"),
+            description=video_detail.get("shortDescription"),
+            duration_seconds=video_detail.get("lengthSeconds", "0"),
+            duration=None,
+            hls_fmts=[],
+            id=video_detail.get("videoId"),
+            is_live=video_detail.get("isLiveContent", False),
+            keywords=video_detail.get("keywords", []),
+            title=video_detail.get("title"),
+            thumbnails=video_detail.get("thumbnail", {}).get("thumbnails", []),
+            video_fmts=None,
+            views=video_detail.get("viewCount"),
         )
-        self._data["video_formats"] = []
-        self._data["video_id"] = video_detail.get("videoId")
-        self._data["views"]: str = video_detail.get("viewCount")
-        player_js_start = resp.index('jsUrl":"')
-        player_js_end = resp.index('",', player_js_start)
-        player_js = resp[player_js_start + len('jsUrl":"') : player_js_end]
-        tmp_formats = data.get("streamingData", {}).get("formats", [])
-        tmp_formats.extend(data.get("streamingData", {}).get("adaptiveFormats", []))
+        result.duration = hh_mm_ss_fmt(int(result.duration_seconds))
+
+        player_js_start = body.index('jsUrl":"')
+        player_js_end = body.index('",', player_js_start)
+        player_js = body[player_js_start + len('jsUrl":"') : player_js_end]
+
+        stream_pattern = re.compile(r"(?P<type>\w+)(?:/\w+;)")
         stream_map = {"video": VideoFormat, "audio": AudioFormat}
-        for stream in tmp_formats:
-            stream_type = re.search(r"(?P<type>\w+)(?:/\w+;)", stream["mimeType"])[
-                "type"
-            ]
-            self._data[f"{stream_type}_formats"].append(
-                stream_map[stream_type](
-                    stream,
-                    self._data["video_id"],
-                    f"https://www.youtube.com{player_js}",
-                )
+        fmts = {"video": [], "audio": []}
+
+        for stream in [
+            *data.get("streamingData", {}).get("formats", []),
+            *data.get("streamingData", {}).get("adaptiveFormats", []),
+        ]:
+            stream_type = stream_pattern.search(stream["mimeType"])["type"]
+            fmts[stream_type].append(
+                stream_map[stream_type](stream, result.id, f"{BASE_URL}{player_js}")
             )
 
-        if self.is_live:
-            return url_decode(data.get("streamingData", {}).get("hlsManifestUrl"))
+        if result.is_live:
+            hls_url = data.get("streamingData", {}).get("hlsManifestUrl")
+            if hls_url:
+                return unquote(hls_url)
+            return None
         return None
 
     def _parse_search(self, body: Union[str, dict], search_result: SearchResult):
