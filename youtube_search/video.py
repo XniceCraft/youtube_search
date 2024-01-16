@@ -4,7 +4,7 @@ YouTube Video Abstraction
 """
 import re
 from dataclasses import dataclass
-from typing import Iterator, List, Optional, Union
+from typing import Any, Iterator, List, Optional, Union
 from urllib.parse import unquote
 
 from .utils import decrypt_youtube_url
@@ -14,36 +14,6 @@ __all__ = [
     "VideoFormat",
     "HLSFormat",
 ]
-
-
-def parse_m3u8(content: str) -> List[Optional[HLSFormat]]:
-    """
-    Parse m3u8
-
-    Parameters
-    ----------
-    content : str
-        m3u8 content
-
-    Returns
-    -------
-    list
-        List of HLS formats
-    """
-    pattern = re.compile(
-        r'^(?:#EXT-X-STREAM-INF\:BANDWIDTH=)(?P<bandwidth>\d+?)(?:,CODECS=")(?P<codecs>[A-Za-z0-9.,]+?)(?:",RESOLUTION=)(?P<resolution>\d+?x\d+?)(?:,FRAME-RATE=)(?P<fps>\d+?)(?:\s+?)(?P<stream_url>.+?)$',
-        re.MULTILINE,
-    )
-    return [
-        HLSFormat(
-            bandwidth=int(result["bandwidth"]),
-            codecs=result["codecs"].split(","),
-            fps=int(result["fps"]),
-            resolution=result["resolution"],
-            url=result["stream_url"],
-        )
-        for result in pattern.finditer(content)
-    ]
 
 
 @dataclass
@@ -57,6 +27,7 @@ class HLSFormat:
     fps: int
     resolution: str  # WxH format
     url: str
+
 
 @dataclass
 class BaseFormat:
@@ -262,23 +233,29 @@ class VideoFormat(BaseFormat):
 
 
 @dataclass(eq=False)
-class VideoData:
+class VideoData:  # pylint: disable=too-many-instance-attributes
     """
     Contains video data
     """
+
     audio_fmts: List[Optional[AudioFormat]]
     author: str
     description: str
     duration_seconds: str
     duration: str
     hls_fmts: List[Optional[HLSFormat]]
-    id: str #pylint: disable=invalid-name
+    id: str  # pylint: disable=invalid-name
     is_live: bool
     keywords: List[str]
     title: str
     thumbnails: List[dict]
     video_fmts: List[Optional[VideoFormat]]
     views: str
+
+    def __eq__(self, item: Any) -> bool:
+        if not isinstance(item, VideoData):
+            return False
+        return self.id == item.id
 
     @property
     def audio_fmts_iter(self) -> Iterator[AudioFormat]:
@@ -335,3 +312,33 @@ class VideoData:
         while idx < len(self.video_fmts):
             yield self.video_fmts[idx]
             idx += 1
+
+
+def parse_m3u8(content: str) -> List[Optional[HLSFormat]]:
+    """
+    Parse m3u8
+
+    Parameters
+    ----------
+    content : str
+        m3u8 content
+
+    Returns
+    -------
+    List[Optional[HLSFormat]]
+        List of HLS formats
+    """
+    pattern = re.compile(
+        r'^(?:#EXT-X-STREAM-INF\:BANDWIDTH=)(?P<bandwidth>\d+?)(?:,CODECS=")(?P<codecs>[A-Za-z0-9.,]+?)(?:",RESOLUTION=)(?P<resolution>\d+?x\d+?)(?:,FRAME-RATE=)(?P<fps>\d+?)(?:.+?\s+)(?P<stream_url>.+?)$',
+        re.MULTILINE | re.ASCII,
+    )
+    return [
+        HLSFormat(
+            bandwidth=int(result["bandwidth"]),
+            codecs=result["codecs"].split(","),
+            fps=int(result["fps"]),
+            resolution=result["resolution"],
+            url=result["stream_url"],
+        )
+        for result in pattern.finditer(content)
+    ]

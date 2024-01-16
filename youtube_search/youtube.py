@@ -2,7 +2,7 @@ import json
 import re
 import urllib.parse
 from types import ModuleType
-from typing import Any, List, Optional, TypedDict, Union
+from typing import Any, List, Optional, Tuple, TypedDict, Union
 from unicodedata import normalize as unicode_normalize
 from urllib.parse import unquote
 
@@ -10,7 +10,7 @@ import aiohttp
 import requests
 
 from .utils import hh_mm_ss_fmt
-from .video import VideoFormat, AudioFormat, VideoData
+from .video import VideoFormat, AudioFormat, VideoData, parse_m3u8
 
 BASE_URL = "https://www.youtube.com"
 YOUTUBE_VIDEO_REGEX = re.compile(
@@ -105,7 +105,7 @@ class YouTube:
         await self.create_session_async()
         return self
 
-    def _extract_video(self, body: str):
+    def _extract_video(self, body: str) -> Tuple[VideoData, Optional[str]]:
         """
         Extract data from response body
 
@@ -156,12 +156,12 @@ class YouTube:
                 stream_map[stream_type](stream, result.id, f"{BASE_URL}{player_js}")
             )
 
-        if result.is_live:
-            hls_url = data.get("streamingData", {}).get("hlsManifestUrl")
-            if hls_url:
-                return unquote(hls_url)
-            return None
-        return None
+        result.audio_fmts = fmts["audio"]
+        result.video_fmts = fmts["video"]
+        hls_url = data.get("streamingData", {}).get("hlsManifestUrl")
+        if hls_url:
+            return (result, unquote(hls_url))
+        return (result, None)
 
     def _parse_search(self, body: Union[str, dict], search_result: SearchResult):
         if search_result.api_key is None or search_result.data is None:
@@ -303,4 +303,12 @@ class YouTube:
         return search_result
 
     def video(self, url: str):
-        ...
+        resp = self.session["sync"].get(url, cookies=self._cookies)
+        resp.raise_for_status()
+        result = self._extract_video(resp.text)
+        if not result[1]:
+            return result[0]
+        resp = self.session["sync"].get(result[1], cookies=self._cookies)
+        resp.raise_for_status()
+        result[0].hls_fmts = parse_m3u8(resp.text)
+        return result[0]
