@@ -13,6 +13,7 @@ __all__ = [
     "AudioFormat",
     "VideoFormat",
     "HLSFormat",
+    "YouTubeVideo"
 ]
 
 
@@ -233,7 +234,7 @@ class VideoFormat(BaseFormat):
 
 
 @dataclass(eq=False)
-class VideoData:  # pylint: disable=too-many-instance-attributes
+class YouTubeVideo:  # pylint: disable=too-many-instance-attributes
     """
     Contains video data
     """
@@ -253,7 +254,7 @@ class VideoData:  # pylint: disable=too-many-instance-attributes
     views: str
 
     def __eq__(self, item: Any) -> bool:
-        if not isinstance(item, VideoData):
+        if not isinstance(item, YouTubeVideo):
             return False
         return self.id == item.id
 

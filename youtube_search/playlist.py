@@ -1,7 +1,7 @@
 """
 Module to parse youtube playlist
 """
-#  pylint: disable = line-too-long
+#  pylint: disable = invalid-name, line-too-long
 
 from dataclasses import dataclass
 from typing import Any, List, Optional
@@ -42,7 +42,7 @@ class YouTubePlaylist:  # pylint: disable=too-many-instance-attributes
     title: str
     thumbnails: List[dict]
     video_count: int
-    videos: List[PlaylistVideoPreview]
+    videos: List[Optional[PlaylistVideoPreview]]
     views: int
 
     def __eq__(self, item: Any) -> bool:

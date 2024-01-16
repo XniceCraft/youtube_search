@@ -9,12 +9,17 @@ from urllib.parse import unquote
 import aiohttp
 import requests
 
+from .exceptions import InvalidURLError
+from .playlist import PlaylistVideoPreview, YouTubePlaylist
 from .utils import hh_mm_ss_fmt
-from .video import VideoFormat, AudioFormat, VideoData, parse_m3u8
+from .video import VideoFormat, AudioFormat, YouTubeVideo, parse_m3u8
 
 BASE_URL = "https://www.youtube.com"
 YOUTUBE_VIDEO_REGEX = re.compile(
     r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:(?:watch|v|embed|live)(?:\?v=|/)|shorts/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$"
+)
+YOUTUBE_PLAYLIST_REGEX = re.compile(
+    r"^(?:https?://)(?:www\.)?(?:youtube\.com/playlist\?list=)(?P<playlist_id>[a-zA-Z0-9\_-]+)$"
 )
 
 ClientSessionDict = TypedDict(
@@ -85,6 +90,7 @@ class SearchResult:
         self.result = []
         return cpy
 
+
 class YouTube:
     def __init__(
         self,
@@ -105,14 +111,113 @@ class YouTube:
         await self.create_session_async()
         return self
 
-    def _extract_video(self, body: str) -> Tuple[VideoData, Optional[str]]:
+    def _extract_playlist(self, body: str) -> YouTubePlaylist:
         """
-        Extract data from response body
+        Extract YouTube playlist
 
         Parameters
         ----------
-        resp : str
-            Response body
+        body : str
+            YouTube playlist page content
+
+        Returns
+        -------
+        YouTubePlaylist
+        """
+        json_str_start = body.index("ytInitialData = {") + len("ytInitialData = ")
+        json_str = body[json_str_start : body.index("};", json_str_start) + 1]
+        data = self.json.loads(json_str)
+        del json_str
+        del json_str_start
+
+        result = YouTubePlaylist(
+            author_name=data.get("header", {})
+            .get("playlistHeaderRenderer", {})
+            .get("ownerText", {})
+            .get("runs", [{}])[0]
+            .get("text"),
+            author_url=f'{BASE_URL}{data.get("header", {}).get("playlistHeaderRenderer", {}).get("ownerEndpoint", {}).get("commandMetadata", {}).get("webCommandMetadata", {}).get("url")}',
+            description=data.get("header", {})
+            .get("playlistHeaderRenderer", {})
+            .get("descriptionText", {})
+            .get("simpleText", ""),
+            id=data.get("header", {})
+            .get("playlistHeaderRenderer", {})
+            .get("playlistId"),
+            title=data.get("metadata", {})
+            .get("playlistMetadataRenderer", {})
+            .get("title"),
+            thumbnails=data.get("header", {})
+            .get("playlistHeaderRenderer", {})
+            .get("playlistHeaderBanner", {})
+            .get("heroPlaylistThumbnailRenderer", {})
+            .get("thumbnail", {})
+            .get("thumbnails", []),
+            video_count=int(
+                data.get("header", {})
+                .get("playlistHeaderRenderer", {})
+                .get("numVideosText", {})
+                .get("runs", [{}])[0]
+                .get("text", 0)
+            ),
+            videos=None,
+            views=None,
+        )
+
+        videos = (
+            data.get("contents", {})
+            .get("twoColumnBrowseResultsRenderer", {})
+            .get("tabs", [{}])[0]
+            .get("tabRenderer", {})
+            .get("content", {})
+            .get("sectionListRenderer", {})
+            .get("contents", [{}])[0]
+            .get("itemSectionRenderer", {})
+            .get("contents", [{}])[0]
+            .get("playlistVideoListRenderer", {})
+            .get("contents", [])
+        )
+        result.videos = [
+            PlaylistVideoPreview(
+                duration=video.get("playlistVideoRenderer", {})
+                .get("lengthText", {})
+                .get("simpleText", "00:00")
+                .replace(".", ":"),
+                id=video.get("playlistVideoRenderer", {}).get("videoId"),
+                thumbnails=video.get("playlistVideoRenderer", {})
+                .get("thumbnail", {})
+                .get("thumbnails", []),
+                title=video.get("playlistVideoRenderer", {})
+                .get("title", {})
+                .get("runs", [{}])[0]
+                .get("text"),
+            )
+            for video in videos
+        ]
+
+        views = (
+            data.get("header", {})
+            .get("playlistHeaderRenderer", {})
+            .get("viewCountText", {})
+            .get("simpleText", "0")
+            .replace(",", "")
+            .replace(".", "")
+        )
+        result.views = int(re.match(r"(?P<views>\d+)", views)["views"])
+        return result
+
+    def _extract_video(self, body: str) -> Tuple[YouTubeVideo, Optional[str]]:
+        """
+        Extract YouTube video
+
+        Parameters
+        ----------
+        body : str
+            YouTube video page content
+
+        Returns
+        -------
+        Tuple[YouTubeVideo, Optional[str]]
         """
         start = body.index("ytInitialPlayerResponse = {") + len(
             "ytInitialPlayerResponse = "
@@ -122,7 +227,7 @@ class YouTube:
         data = self.json.loads(json_str)
 
         video_detail = data.get("videoDetails", {})
-        result = VideoData(
+        result = YouTubeVideo(
             audio_fmts=None,
             author=video_detail.get("author"),
             description=video_detail.get("shortDescription"),
@@ -140,8 +245,9 @@ class YouTube:
         result.duration = hh_mm_ss_fmt(int(result.duration_seconds))
 
         player_js_start = body.index('jsUrl":"')
-        player_js_end = body.index('",', player_js_start)
-        player_js = body[player_js_start + len('jsUrl":"') : player_js_end]
+        player_js = body[
+            player_js_start + len('jsUrl":"') : body.index('",', player_js_start)
+        ]
 
         stream_pattern = re.compile(r"(?P<type>\w+)(?:/\w+;)")
         stream_map = {"video": VideoFormat, "audio": AudioFormat}
@@ -163,7 +269,23 @@ class YouTube:
             return (result, unquote(hls_url))
         return (result, None)
 
-    def _parse_search(self, body: Union[str, dict], search_result: SearchResult):
+    def _parse_search(
+        self, body: Union[str, dict], search_result: SearchResult
+    ) -> SearchResult:
+        """
+        Parse the response body
+
+        Parameters
+        ----------
+        body : Union[str, dict]
+            YouTube search page content
+        search_result : SearchResult
+            SearchResult obj
+
+        Returns
+        -------
+        SearchResult
+        """
         if search_result.api_key is None or search_result.data is None:
             start = body.index("ytInitialData") + len("ytInitialData") + 3
             end = body.index("};", start) + 1
@@ -283,7 +405,21 @@ class YouTube:
         if self.session["async"] is None:
             self.session["async"] = aiohttp.ClientSession()
 
-    def search(self, query: Union[str, SearchResult], pages: int = 1):
+    def search(self, query: Union[str, SearchResult], pages: int = 1) -> SearchResult:
+        """
+        Do search on YouTube
+
+        Parameters
+        ----------
+        query : Union[str, SearchResult]
+            Search query
+        pages : int, optional
+            How many pages that you wanna search, default 1
+
+        Returns
+        -------
+        SearchResult
+        """
         if isinstance(query, SearchResult):
             url = f"{BASE_URL}/youtubei/v1/search?{query.api_key}&prettyPrint=false"
             resp = self.session["sync"].post(
@@ -302,13 +438,60 @@ class YouTube:
         self._parse_search(resp.text, search_result)
         return search_result
 
-    def video(self, url: str):
+    def video(self, url: str, check_url=True) -> YouTubeVideo:
+        """
+        Get YouTube Video information
+
+        Parameters
+        ----------
+        url : str
+            YouTube video url
+        check_url : bool, optional
+            Check if the url is valid, by default True
+
+        Returns
+        -------
+        YouTubeVideo
+
+        Raises
+        ------
+        InvalidURLError
+            Raised if url does't pass regex check
+        """
+        if check_url and not YOUTUBE_VIDEO_REGEX.match(url):
+            raise InvalidURLError(f"{url} isn't valid YouTube video url")
         resp = self.session["sync"].get(url, cookies=self._cookies)
         resp.raise_for_status()
         result = self._extract_video(resp.text)
         if not result[1]:
             return result[0]
+
         resp = self.session["sync"].get(result[1], cookies=self._cookies)
         resp.raise_for_status()
         result[0].hls_fmts = parse_m3u8(resp.text)
         return result[0]
+
+    def playlist(self, url: str, check_url=True) -> YouTubePlaylist:
+        """_summary_
+
+        Parameters
+        ----------
+        url : str
+            YouTube playlist url
+        check_url : bool, optional
+            Check if the url is valid, by default True
+
+        Returns
+        -------
+        YouTubePlaylist
+
+        Raises
+        ------
+        InvalidURLError
+            Raised if url does't pass regex check
+        """
+        if check_url and not YOUTUBE_PLAYLIST_REGEX.match(url):
+            raise InvalidURLError(f"{url} isn't valid YouTube playlist url")
+        resp = self.session["sync"].get(url, cookies=self._cookies)
+        resp.raise_for_status()
+        return self._extract_playlist(resp.text)
