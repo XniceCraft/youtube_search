@@ -12,7 +12,13 @@ import requests
 from .exceptions import InvalidURLError
 from .playlist import PlaylistVideoPreview, YouTubePlaylist
 from .utils import hh_mm_ss_fmt
-from .video import VideoFormat, AudioFormat, YouTubeVideo, parse_m3u8
+from .video import (
+    VideoFormat,
+    AudioFormat,
+    YouTubeVideo,
+    parse_m3u8,
+    decrypt_stream_url,
+)
 
 BASE_URL = "https://www.youtube.com"
 YOUTUBE_VIDEO_REGEX = re.compile(
@@ -21,6 +27,10 @@ YOUTUBE_VIDEO_REGEX = re.compile(
 YOUTUBE_PLAYLIST_REGEX = re.compile(
     r"^(?:https?://)(?:www\.)?(?:youtube\.com/playlist\?list=)(?P<playlist_id>[a-zA-Z0-9\_-]+)$"
 )
+YOUTUBE_REQUEST_HEADERS = {
+    "Origin": BASE_URL,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
 
 ClientSessionDict = TypedDict(
     "ClientSessionDict",
@@ -222,9 +232,9 @@ class YouTube:
         start = body.index("ytInitialPlayerResponse = {") + len(
             "ytInitialPlayerResponse = "
         )
-        end = body.index("};", start) + 1
-        json_str = body[start:end]
+        json_str = body[start : body.index("};", start) + 1]
         data = self.json.loads(json_str)
+        del json_str
 
         video_detail = data.get("videoDetails", {})
         result = YouTubeVideo(
@@ -250,20 +260,73 @@ class YouTube:
         ]
 
         stream_pattern = re.compile(r"(?P<type>\w+)(?:/\w+;)")
-        stream_map = {"video": VideoFormat, "audio": AudioFormat}
-        fmts = {"video": [], "audio": []}
-
+        streams = {"audio": [], "video": []}
         for stream in [
             *data.get("streamingData", {}).get("formats", []),
             *data.get("streamingData", {}).get("adaptiveFormats", []),
         ]:
-            stream_type = stream_pattern.search(stream["mimeType"])["type"]
-            fmts[stream_type].append(
-                stream_map[stream_type](stream, result.id, f"{BASE_URL}{player_js}")
-            )
+            stream_name = stream_pattern.search(stream["mimeType"])["type"]
+            if stream_name in streams:
+                streams[stream_name].append(stream)
 
-        result.audio_fmts = fmts["audio"]
-        result.video_fmts = fmts["video"]
+        result.video_fmts = [
+            VideoFormat(
+                average_bitrate=stream.get("averageBitrate"),
+                bitrate=stream.get("bitrate"),
+                codecs=[
+                    i.strip()
+                    for i in re.search(
+                        r"(?:codecs=\")(?P<codecs>.+)(?:\")", stream["mimeType"]
+                    )["codecs"].split(",")
+                ],
+                content_length=stream.get("contentLength"),
+                itag=stream.get("itag"),
+                url=decrypt_stream_url(stream, result.id, player_js),
+                audio_stream=AudioFormat(
+                    average_bitrate=stream.get("averageBitrate"),
+                    bitrate=stream.get("bitrate"),
+                    codecs=[
+                        i.strip()
+                        for i in re.search(
+                            r"(?:codecs=\")(?P<codecs>.+)(?:\")", stream["mimeType"]
+                        )["codecs"].split(",")
+                    ],
+                    content_length=stream.get("contentLength"),
+                    itag=stream.get("itag"),
+                    url=decrypt_stream_url(stream, result.id, player_js),
+                    channels=stream["audioChannels"],
+                    quality=stream["audioQuality"]
+                    .replace("AUDIO_QUALITY_", "")
+                    .title(),
+                    sample_rate=stream["audioSampleRate"],
+                )
+                if "audioChannels" in stream
+                else None,
+                fps=stream.get("fps"),
+                quality=stream.get("qualityLabel"),
+            )
+            for stream in streams.get("video", [])
+        ]
+        result.audio_fmts = [
+            AudioFormat(
+                average_bitrate=stream.get("averageBitrate"),
+                bitrate=stream.get("bitrate"),
+                codecs=[
+                    i.strip()
+                    for i in re.search(
+                        r"(?:codecs=\")(?P<codecs>.+)(?:\")", stream["mimeType"]
+                    )["codecs"].split(",")
+                ],
+                content_length=stream.get("contentLength"),
+                itag=stream.get("itag"),
+                url=decrypt_stream_url(stream, result.id, player_js),
+                channels=stream["audioChannels"],
+                quality=stream["audioQuality"].replace("AUDIO_QUALITY_", "").title(),
+                sample_rate=stream["audioSampleRate"],
+            )
+            for stream in streams.get("audio", [])
+        ]
+
         hls_url = data.get("streamingData", {}).get("hlsManifestUrl")
         if hls_url:
             return (result, unquote(hls_url))
@@ -299,13 +362,13 @@ class YouTube:
 
             context = self.json.loads(
                 re.search(
-                    r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.*)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")",  # pylint: disable=line-too-long
+                    r"(?:\"INNERTUBE_CONTEXT\"\:)(?P<context>\{(.+?)\})(?:,\"INNERTUBE_CONTEXT_CLIENT_NAME\")",  # pylint: disable=line-too-long
                     body,
                     re.DOTALL,
                 )["context"]
             )
             continuation = re.search(
-                r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+)(?:\",\"request\")",
+                r"(?:\"continuationCommand\":{\"token\":\")(?P<token>.+?)(?:\",\"request\":\"CONTINUATION_REQUEST_TYPE_SEARCH\")",
                 body,
             )["token"]
 
@@ -315,7 +378,7 @@ class YouTube:
                 "primaryContents"
             ]["sectionListRenderer"]["contents"]
         else:
-            contents = (
+            contents: list = (
                 body.get("onResponseReceivedCommands", [{}])[0]
                 .get("appendContinuationItemsAction", {})
                 .get("continuationItems", [])
@@ -421,11 +484,16 @@ class YouTube:
         SearchResult
         """
         if isinstance(query, SearchResult):
-            url = f"{BASE_URL}/youtubei/v1/search?{query.api_key}&prettyPrint=false"
+            url = f"{BASE_URL}/youtubei/v1/search?key={query.api_key}&prettyPrint=false"
+            headers = YOUTUBE_REQUEST_HEADERS
+            headers[
+                "Referer"
+            ] = f"{BASE_URL}/results?search_query={urllib.parse.quote_plus(query.query)}"
             resp = self.session["sync"].post(
                 url,
                 cookies=self._cookies,
                 data=self.json.dumps(query.data),
+                headers=headers,
             )
             resp.raise_for_status()
             self._parse_search(resp.json(), query)
@@ -433,7 +501,9 @@ class YouTube:
 
         search_result = SearchResult(query)
         url = f"{BASE_URL}/results?search_query={urllib.parse.quote_plus(query)}"
-        resp = self.session["sync"].get(url, cookies=self._cookies)
+        resp = self.session["sync"].get(
+            url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+        )
         resp.raise_for_status()
         self._parse_search(resp.text, search_result)
         return search_result
@@ -460,19 +530,24 @@ class YouTube:
         """
         if check_url and not YOUTUBE_VIDEO_REGEX.match(url):
             raise InvalidURLError(f"{url} isn't valid YouTube video url")
-        resp = self.session["sync"].get(url, cookies=self._cookies)
+        resp = self.session["sync"].get(
+            url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+        )
         resp.raise_for_status()
         result = self._extract_video(resp.text)
         if not result[1]:
             return result[0]
 
-        resp = self.session["sync"].get(result[1], cookies=self._cookies)
+        resp = self.session["sync"].get(
+            result[1], cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+        )
         resp.raise_for_status()
         result[0].hls_fmts = parse_m3u8(resp.text)
         return result[0]
 
     def playlist(self, url: str, check_url=True) -> YouTubePlaylist:
-        """_summary_
+        """
+        Get YouTube Playlist information
 
         Parameters
         ----------
@@ -492,6 +567,8 @@ class YouTube:
         """
         if check_url and not YOUTUBE_PLAYLIST_REGEX.match(url):
             raise InvalidURLError(f"{url} isn't valid YouTube playlist url")
-        resp = self.session["sync"].get(url, cookies=self._cookies)
+        resp = self.session["sync"].get(
+            url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+        )
         resp.raise_for_status()
         return self._extract_playlist(resp.text)

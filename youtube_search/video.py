@@ -5,6 +5,7 @@ YouTube Video Abstraction
 import re
 from dataclasses import dataclass
 from typing import Any, Iterator, List, Optional, Union
+
 from urllib.parse import unquote
 
 from .utils import decrypt_youtube_url
@@ -30,207 +31,47 @@ class HLSFormat:
     url: str
 
 
-@dataclass
+@dataclass(eq=False)
 class BaseFormat:
     """
     Base class for YouTube Format.
     """
+    average_bitrate: Optional[int]
+    bitrate: Optional[int]
+    codecs: List[str]
+    content_length: Optional[int]
+    itag: int
+    url: str
 
-    def __init__(self, data: dict, video_id: str, player_js: str):
-        self.data = data
-        #  TODO: Add function to decrypt encrypted url
-        # Right now we're using yt-dlp to decrypt youtube signature
-        self.data["url"] = (
-            unquote(data["url"])
-            if "url" in data
-            else decrypt_youtube_url(data["signatureCipher"], video_id, player_js)
-        )
-        result = re.search(r"(?:codecs=\")(?P<codecs>.+)(?:\")", self.data["mimeType"])[
-            "codecs"
-        ]
-        self.data["codecs"] = [i.strip() for i in result.split(",")]
-        del result
+    def __eq__(self, item: Any):
+        if not isinstance(item, BaseFormat):
+            return False
+        return self.itag == item.itag
 
-    @property
-    def average_bitrate(self) -> Union[int, None]:
-        """
-        Return average bitrate
-
-        Returns
-        -------
-        Union[int, None]
-            Average bitrate
-        """
-        return self.data.get("averageBitrate")
-
-    @property
-    def bitrate(self) -> Union[int, None]:
-        """
-        Return bitrate
-
-        Returns
-        -------
-        Union[int, None]
-            Bitrate
-        """
-        return self.data.get("bitrate")
-
-    @property
-    def codecs(self) -> List[str]:
-        """
-        Return codecs
-
-        Returns
-        -------
-        List[str]
-            List of codec
-        """
-        return self.data.get("codecs", [])
-
-    @property
-    def content_length(self) -> Union[int, None]:
-        """
-        Return content length
-
-        Returns
-        -------
-        Union[int, None]
-            Content length
-        """
-        return self.data.get("contentLength")
-
-    @property
-    def itag(self) -> int:
-        """
-        Return itag
-
-        Returns
-        -------
-        int
-            itag
-        """
-        return self.data.get("itag")
-
-    @property
-    def url(self) -> str:
-        """
-        Return stream url
-
-        Returns
-        -------
-        str
-            Stream url
-        """
-        return self.data.get("url")
-
-
+@dataclass(repr=False)
 class AudioFormat(BaseFormat):
     """
     Contains audio data
     """
-
-    def __init__(self, data: dict, *args):
-        super().__init__(data, *args)
-        self.data = data
+    channels: int
+    quality: str
+    sample_rate: str
 
     def __repr__(self):
         return f"<audio stream, channels={self.channels}, codecs={self.codecs}, itag={self.itag}, quality={self.quality}, sample_rate={self.sample_rate}>"
 
-    @property
-    def channels(self) -> int:
-        """
-        Return audio channel
 
-        Returns
-        -------
-        int
-            Audio channels
-        """
-        return self.data["audioChannels"]
-
-    @property
-    def quality(self) -> str:
-        """
-        Return audio quality
-
-        Returns
-        -------
-        str
-            Audio quality
-        """
-        return self.data["audioQuality"].replace("AUDIO_QUALITY_", "").title()
-
-    @property
-    def sample_rate(self) -> str:
-        """
-        Return audio sample rate
-
-        Returns
-        -------
-        str
-            Audio sample rate
-        """
-        return self.data["audioSampleRate"]
-
-
+@dataclass(repr=False)
 class VideoFormat(BaseFormat):
     """
     Contains video data
     """
-
-    def __init__(self, data: dict, *args):
-        super().__init__(data, *args)
-        self.data = data
+    audio_stream: Optional[AudioFormat]
+    fps: int
+    quality: str # Return quality like 360p, 720p, etc
 
     def __repr__(self):
-        return f"<video stream, codecs={self.codecs}, fps={self.fps}, itag={self.itag}, quality={self.quality}, has_audio={self.has_audio()}>"
-
-    @property
-    def audio_data(self) -> Union[AudioFormat, None]:
-        """
-        Return audio data
-
-        Returns
-        -------
-        Union[AudioFormat, None]
-        """
-        if not self.has_audio():
-            return None
-        return AudioFormat(self.data)
-
-    @property
-    def fps(self) -> int:
-        """
-        Return FPS
-
-        Returns
-        -------
-        int
-            FPS
-        """
-        return self.data.get("fps")
-
-    @property
-    def quality(self) -> str:
-        """
-        Return quality like 360p, 720p, etc
-
-        Returns
-        -------
-        str
-            Quality label
-        """
-        return self.data.get("qualityLabel")
-
-    def has_audio(self) -> bool:
-        """
-        Check if contains audio stream in stream data
-
-        Returns
-        -------
-        bool
-        """
-        return "audioChannels" in self.data
+        return f"<video stream, codecs={self.codecs}, fps={self.fps}, itag={self.itag}, quality={self.quality}, has_audio={bool(self.audio_stream)}>"
 
 
 @dataclass(eq=False)
@@ -314,6 +155,25 @@ class YouTubeVideo:  # pylint: disable=too-many-instance-attributes
             yield self.video_fmts[idx]
             idx += 1
 
+def decrypt_stream_url(stream_data: dict, video_id: str, player_js: str) -> str:
+    """
+    Decrypt stream url
+
+    Parameters
+    ----------
+    stream_data : dict
+        Stream data
+    video_id : str
+        Video id
+    player_js : str
+        YouTube player javascript
+
+    Returns
+    -------
+    str
+        Decrypted url
+    """
+    return unquote(stream_data["url"]) if "url" in stream_data else decrypt_youtube_url(stream_data["signatureCipher"], video_id, player_js)
 
 def parse_m3u8(content: str) -> List[Optional[HLSFormat]]:
     """
