@@ -92,7 +92,7 @@ class YouTubeVideo:  # pylint: disable=too-many-instance-attributes
     title: str
     thumbnails: List[dict]
     video_fmts: List[Optional[VideoFormat]]
-    views: str
+    views: Optional[int]
 
     def __eq__(self, item: Any) -> bool:
         if not isinstance(item, YouTubeVideo):

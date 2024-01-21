@@ -107,11 +107,14 @@ class YouTube:
         language: str = "",
         region: str = "",
         json_parser: Optional[ModuleType] = None,
+        session: Optional[ClientSessionDict] = None,
     ):
         self.json = json_parser or json
-        self.session: ClientSessionDict = {"async": None, "sync": None}
+        self.session: ClientSessionDict = session or {"async": None, "sync": None}
 
         self._cookies = {"PREF": f"hl={language}&gl={region}", "domain": ".youtube.com"}
+
+        self.__custom_session = bool(session)
 
     def __enter__(self) -> "YouTube":
         self.create_session()
@@ -250,7 +253,7 @@ class YouTube:
             title=video_detail.get("title"),
             thumbnails=video_detail.get("thumbnail", {}).get("thumbnails", []),
             video_fmts=None,
-            views=video_detail.get("viewCount"),
+            views=int(video_detail.get("viewCount")) if video_detail.get("viewCount") else None,
         )
         result.duration = hh_mm_ss_fmt(int(result.duration_seconds))
 
@@ -259,15 +262,14 @@ class YouTube:
             player_js_start + len('jsUrl":"') : body.index('",', player_js_start)
         ]
 
-        stream_pattern = re.compile(r"(?P<type>\w+)(?:/\w+;)")
+        stream_pattern = re.compile(r"(?P<type>(audio|video))(?:/\w+)")
         streams = {"audio": [], "video": []}
         for stream in [
             *data.get("streamingData", {}).get("formats", []),
             *data.get("streamingData", {}).get("adaptiveFormats", []),
         ]:
             stream_name = stream_pattern.search(stream["mimeType"])["type"]
-            if stream_name in streams:
-                streams[stream_name].append(stream)
+            streams[stream_name].append(stream)
 
         result.video_fmts = [
             VideoFormat(
@@ -452,6 +454,12 @@ class YouTube:
                         views=video_data.get("viewCountText", {}).get("simpleText"),
                     )
                 )
+
+    def close(self) -> None:
+        """
+        Cleanup resources
+        """
+        self.session["sync"].close()
 
     def create_session(self) -> None:
         """
