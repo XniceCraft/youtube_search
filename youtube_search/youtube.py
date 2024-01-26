@@ -1,8 +1,10 @@
+import asyncio
+import concurrent.futures
 import json
 import re
 import urllib.parse
 from types import ModuleType
-from typing import Any, List, Optional, Tuple, TypedDict, Union
+from typing import Optional, Tuple, TypedDict, Union
 from unicodedata import normalize as unicode_normalize
 from urllib.parse import unquote
 
@@ -11,6 +13,11 @@ import requests
 
 from .exceptions import InvalidURLError
 from .playlist import PlaylistVideoPreview, YouTubePlaylist
+from .search import (
+    SearchData,
+    SearchResult,
+    SearchVideoPreview,
+)
 from .utils import hh_mm_ss_fmt
 from .video import (
     VideoFormat,
@@ -38,69 +45,6 @@ ClientSessionDict = TypedDict(
 )
 
 
-# Search
-class SearchData(TypedDict):
-    """
-    Data that used to search next page
-    """
-
-    context: str
-    continuation: str
-
-
-class VideoPreview(TypedDict):  # pylint: disable=too-many-instance-attributes
-    """
-    Contains video information
-    """
-
-    channel: str
-    desc_snippet: Optional[str]
-    duration: Optional[str]
-    id: str
-    owner_url: str
-    owner_name: str
-    publish_time: str
-    thumbnails: List[Optional[str]]
-    title: str
-    url_suffix: str
-    views: int
-
-    def __eq__(self, item: Any):
-        if not isinstance(item, VideoPreview):
-            return False
-        return item.get("id") == self.get("id")
-
-
-class SearchResult:
-    def __init__(self, query: str):
-        self.api_key: str = None  # Modified in YouTube.search
-        self.data: SearchData = None  # Modified in YouTube.search
-        self.query = query
-        self.result: List[Optional[VideoPreview]] = []
-
-    def __repr__(self):
-        return f"<search query={self.query} total_result={len(self.result)}>"
-
-    def get(self, cache: bool = True) -> List[Optional[VideoPreview]]:
-        """
-        Return the search result
-
-        Parameters
-        ----------
-        cache : bool
-            Keep the result
-
-        Returns
-        -------
-        List[Optional[VideoPreview]]
-        """
-        if cache:
-            return self.result
-        cpy = self.result
-        self.result = []
-        return cpy
-
-
 class YouTube:
     def __init__(
         self,
@@ -108,20 +52,28 @@ class YouTube:
         region: str = "",
         json_parser: Optional[ModuleType] = None,
         session: Optional[ClientSessionDict] = None,
+        pool: Optional[concurrent.futures.ThreadPoolExecutor] = None,
     ):
         self.json = json_parser or json
+        self.pool = pool
         self.session: ClientSessionDict = session or {"async": None, "sync": None}
 
-        self._cookies = {"PREF": f"hl={language}&gl={region}", "domain": ".youtube.com"}
+        self._cookies = {"PREF": f"hl={language}&gl={region}"}
 
         self.__custom_session = bool(session)
+
+    def __exit__(self, *_) -> None:
+        self.close()
+
+    async def __aexit__(self, *_) -> None:
+        await self.aclose()
 
     def __enter__(self) -> "YouTube":
         self.create_session()
         return self
 
     async def __aenter__(self) -> "YouTube":
-        await self.create_session_async()
+        await self.acreate_session()
         return self
 
     def _extract_playlist(self, body: str) -> YouTubePlaylist:
@@ -253,7 +205,9 @@ class YouTube:
             title=video_detail.get("title"),
             thumbnails=video_detail.get("thumbnail", {}).get("thumbnails", []),
             video_fmts=None,
-            views=int(video_detail.get("viewCount")) if video_detail.get("viewCount") else None,
+            views=int(video_detail.get("viewCount"))
+            if video_detail.get("viewCount")
+            else None,
         )
         result.duration = hh_mm_ss_fmt(int(result.duration_seconds))
 
@@ -393,10 +347,14 @@ class YouTube:
             if "itemSectionRenderer" not in content:
                 continue
             for video in content.get("itemSectionRenderer", {}).get("contents", {}):
-                # if self.max_results is not None and self.count >= self.max_results:
-                #    return
                 if "videoRenderer" not in video:
                     continue
+
+                if (
+                    isinstance(search_result.max_result, int)
+                    and len(search_result) > search_result.max_result
+                ):
+                    return
 
                 video_data = video.get("videoRenderer", {})
                 owner_url_suffix = (
@@ -408,7 +366,7 @@ class YouTube:
                 )
 
                 search_result.result.append(
-                    VideoPreview(
+                    SearchVideoPreview(
                         channel=(
                             video_data.get("longBylineText", {})
                             .get("runs", [[{}]])[0]
@@ -459,24 +417,38 @@ class YouTube:
         """
         Cleanup resources
         """
-        self.session["sync"].close()
+        if not self.__custom_session and self.session["sync"]:
+            self.session["sync"].close()
+
+    async def aclose(self) -> None:
+        """
+        Cleanup resources
+        """
+        if not self.__custom_session and self.session["async"]:
+            await self.session["async"].close()
+            await asyncio.sleep(0.250)
 
     def create_session(self) -> None:
         """
         Create requests session
         """
-        if self.session["sync"] is None:
+        if self.session["sync"] is None and not self.__custom_session:
             self.session["sync"] = requests.Session()
             requests.models.complexjson = self.json
 
-    async def create_session_async(self) -> None:
+    async def acreate_session(self) -> None:
         """
         Create aiohttp client session
         """
-        if self.session["async"] is None:
+        if self.session["async"] is None and not self.__custom_session:
             self.session["async"] = aiohttp.ClientSession()
 
-    def search(self, query: Union[str, SearchResult], pages: int = 1) -> SearchResult:
+    def search(
+        self,
+        query: Union[str, SearchResult],
+        pages: int = 1,
+        max_result: Optional[int] = None,
+    ) -> SearchResult:
         """
         Do search on YouTube
 
@@ -491,29 +463,101 @@ class YouTube:
         -------
         SearchResult
         """
-        if isinstance(query, SearchResult):
-            url = f"{BASE_URL}/youtubei/v1/search?key={query.api_key}&prettyPrint=false"
+        search_result = (
+            query if isinstance(query, SearchResult) else SearchResult(query)
+        )
+        search_result.max_result = max_result
+        if pages < 1:
+            return search_result
+
+        if not isinstance(query, SearchResult):
+            pages -= 1
+            url = f"{BASE_URL}/results?search_query={urllib.parse.quote_plus(query)}"
+            resp = self.session["sync"].get(
+                url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+            )
+            resp.raise_for_status()
+            self._parse_search(resp.text, search_result)
+
+        for _ in range(pages):
+            url = f"{BASE_URL}/youtubei/v1/search?key={search_result.api_key}&prettyPrint=false"
             headers = YOUTUBE_REQUEST_HEADERS
             headers[
                 "Referer"
-            ] = f"{BASE_URL}/results?search_query={urllib.parse.quote_plus(query.query)}"
+            ] = f"{BASE_URL}/results?search_result={urllib.parse.quote_plus(search_result.query)}"
             resp = self.session["sync"].post(
                 url,
                 cookies=self._cookies,
-                data=self.json.dumps(query.data),
+                data=self.json.dumps(search_result.data),
                 headers=headers,
             )
             resp.raise_for_status()
-            self._parse_search(resp.json(), query)
-            return query
+            self._parse_search(resp.json(), search_result)
+        return search_result
 
-        search_result = SearchResult(query)
-        url = f"{BASE_URL}/results?search_query={urllib.parse.quote_plus(query)}"
-        resp = self.session["sync"].get(
-            url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+    async def asearch(
+        self,
+        query: Union[str, SearchResult],
+        pages: int = 1,
+        max_result: Optional[int] = None,
+    ) -> SearchResult:
+        """
+        Do search on YouTube
+
+        Parameters
+        ----------
+        query : Union[str, SearchResult]
+            Search query
+        pages : int, optional
+            How many pages that you wanna search, default 1
+
+        Returns
+        -------
+        SearchResult
+        """
+        search_result = (
+            query if isinstance(query, SearchResult) else SearchResult(query)
         )
-        resp.raise_for_status()
-        self._parse_search(resp.text, search_result)
+        search_result.max_result = max_result
+        if pages < 1:
+            return search_result
+
+        loop = asyncio.get_running_loop()
+        if not isinstance(query, SearchResult):
+            pages -= 1
+            url = f"{BASE_URL}/results?search_query={urllib.parse.quote_plus(query)}"
+            async with self.session["async"].get(
+                url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+            ) as resp:
+                resp.raise_for_status()
+                body = await resp.text()
+            await loop.run_in_executor(
+                self.pool, self._parse_search, body, search_result
+            )
+
+        if pages < 1:
+            return search_result
+
+        async def send_req():
+            url = f"{BASE_URL}/youtubei/v1/search?key={search_result.api_key}&prettyPrint=false"
+            headers = YOUTUBE_REQUEST_HEADERS
+            headers[
+                "Referer"
+            ] = f"{BASE_URL}/results?search_result={urllib.parse.quote_plus(search_result.query)}"
+            async with self.session["async"].post(
+                url,
+                cookies=self._cookies,
+                data=self.json.dumps(search_result.data),
+                headers=headers,
+            ) as resp:
+                resp.raise_for_status()
+                body = await resp.json(loads=self.json.loads)
+
+            await loop.run_in_executor(
+                self.pool, self._parse_search, body, search_result
+            )
+
+        await asyncio.gather(*[send_req() for _ in range(pages)])
         return search_result
 
     def video(self, url: str, check_url=True) -> YouTubeVideo:
@@ -553,6 +597,45 @@ class YouTube:
         result[0].hls_fmts = parse_m3u8(resp.text)
         return result[0]
 
+    async def avideo(self, url: str, check_url=True) -> YouTubeVideo:
+        """
+        Get YouTube Video information
+
+        Parameters
+        ----------
+        url : str
+            YouTube video url
+        check_url : bool, optional
+            Check if the url is valid, by default True
+
+        Returns
+        -------
+        YouTubeVideo
+
+        Raises
+        ------
+        InvalidURLError
+            Raised if url does't pass regex check
+        """
+        if check_url and not YOUTUBE_VIDEO_REGEX.match(url):
+            raise InvalidURLError(f"{url} isn't valid YouTube video url")
+        async with self.session["async"].get(
+            url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+        ) as resp:
+            resp.raise_for_status()
+            body = await resp.text()
+        result = self._extract_video(body)
+        if not result[1]:
+            return result[0]
+
+        async with self.session["async"].get(
+            result[1], cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+        ) as resp:
+            resp.raise_for_status()
+            body = await resp.text()
+        result[0].hls_fmts = parse_m3u8(body)
+        return result[0]
+
     def playlist(self, url: str, check_url=True) -> YouTubePlaylist:
         """
         Get YouTube Playlist information
@@ -580,3 +663,32 @@ class YouTube:
         )
         resp.raise_for_status()
         return self._extract_playlist(resp.text)
+
+    async def aplaylist(self, url: str, check_url=True) -> YouTubePlaylist:
+        """
+        Get YouTube Playlist information
+
+        Parameters
+        ----------
+        url : str
+            YouTube playlist url
+        check_url : bool, optional
+            Check if the url is valid, by default True
+
+        Returns
+        -------
+        YouTubePlaylist
+
+        Raises
+        ------
+        InvalidURLError
+            Raised if url does't pass regex check
+        """
+        if check_url and not YOUTUBE_PLAYLIST_REGEX.match(url):
+            raise InvalidURLError(f"{url} isn't valid YouTube playlist url")
+        async with self.session["async"].get(
+            url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+        ) as resp:
+            resp.raise_for_status()
+            result = await resp.text()
+        return self._extract_playlist(result)

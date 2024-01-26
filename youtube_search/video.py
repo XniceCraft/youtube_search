@@ -10,12 +10,7 @@ from urllib.parse import unquote
 
 from .utils import decrypt_youtube_url
 
-__all__ = [
-    "AudioFormat",
-    "VideoFormat",
-    "HLSFormat",
-    "YouTubeVideo"
-]
+__all__ = ["AudioFormat", "VideoFormat", "HLSFormat", "YouTubeVideo"]
 
 
 @dataclass
@@ -36,6 +31,7 @@ class BaseFormat:
     """
     Base class for YouTube Format.
     """
+
     average_bitrate: Optional[int]
     bitrate: Optional[int]
     codecs: List[str]
@@ -48,11 +44,13 @@ class BaseFormat:
             return False
         return self.itag == item.itag
 
+
 @dataclass(repr=False)
 class AudioFormat(BaseFormat):
     """
     Contains audio data
     """
+
     channels: int
     quality: str
     sample_rate: str
@@ -66,9 +64,10 @@ class VideoFormat(BaseFormat):
     """
     Contains video data
     """
+
     audio_stream: Optional[AudioFormat]
     fps: int
-    quality: str # Return quality like 360p, 720p, etc
+    quality: str  # Return quality like 360p, 720p, etc
 
     def __repr__(self):
         return f"<video stream, codecs={self.codecs}, fps={self.fps}, itag={self.itag}, quality={self.quality}, has_audio={bool(self.audio_stream)}>"
@@ -155,6 +154,7 @@ class YouTubeVideo:  # pylint: disable=too-many-instance-attributes
             yield self.video_fmts[idx]
             idx += 1
 
+
 def decrypt_stream_url(stream_data: dict, video_id: str, player_js: str) -> str:
     """
     Decrypt stream url
@@ -173,7 +173,12 @@ def decrypt_stream_url(stream_data: dict, video_id: str, player_js: str) -> str:
     str
         Decrypted url
     """
-    return unquote(stream_data["url"]) if "url" in stream_data else decrypt_youtube_url(stream_data["signatureCipher"], video_id, player_js)
+    return (
+        unquote(stream_data["url"])
+        if "url" in stream_data
+        else decrypt_youtube_url(stream_data["signatureCipher"], video_id, player_js)
+    )
+
 
 def parse_m3u8(content: str) -> List[Optional[HLSFormat]]:
     """

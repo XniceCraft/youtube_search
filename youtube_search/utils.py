@@ -2,7 +2,7 @@
 Utilities for youtube search
 """
 
-__all__ = ["decrypt_youtube_url"]
+__all__ = ["decrypt_youtube_url", "hh_mm_ss_fmt"]
 
 from urllib.parse import parse_qs
 import yt_dlp
@@ -30,9 +30,12 @@ def decrypt_youtube_url(signature: str, video_id: str, player_js: str):
         Youtube decrypted URL
     """
     parse_sig = parse_qs(signature)
-    result = extractor._decrypt_signature(parse_sig["s"][0], video_id, player_js) # pylint: disable=protected-access
+    result = extractor._decrypt_signature(
+        parse_sig["s"][0], video_id, player_js
+    )  # pylint: disable=protected-access
     sp = parse_sig["sp"][0] if "sp" in parse_sig else "signature"
     return f"{parse_sig['url'][0]}&{sp}={result}"
+
 
 def hh_mm_ss_fmt(seconds: int) -> str:
     """
