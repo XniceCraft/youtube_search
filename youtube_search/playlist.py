@@ -6,6 +6,8 @@ Module to parse youtube playlist
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
+from .video import VideoThumbnail
+
 __all__ = ["PlaylistVideoPreview", "YouTubePlaylist"]
 
 
@@ -40,7 +42,7 @@ class YouTubePlaylist:  # pylint: disable=too-many-instance-attributes
     description: Optional[str]
     id: str
     title: str
-    thumbnails: List[dict]
+    thumbnails: List[VideoThumbnail]
     video_count: int
     videos: List[Optional[PlaylistVideoPreview]]
     views: int

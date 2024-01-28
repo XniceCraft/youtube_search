@@ -18,4 +18,5 @@ Read here : <a href="example.md">Example</a>
 Read here : <a href="https://xnicecraft.github.io/youtube_search/youtube_search.html">Documentation</a>
 
 ## Note
-This module depends on yt-dlp to decrypt the youtube signature.
+- This module depends on yt-dlp to decrypt the youtube signature.
+- The json module have significant impact on performance (try: ujson, orjson, rapidjson, etc)

@@ -4,7 +4,7 @@ YouTube Video Abstraction
 """
 import re
 from dataclasses import dataclass
-from typing import Any, Iterator, List, Optional, Union
+from typing import Any, Iterator, List, TypedDict, Optional, Union
 
 from urllib.parse import unquote
 
@@ -12,6 +12,10 @@ from .utils import decrypt_youtube_url
 
 __all__ = ["AudioFormat", "VideoFormat", "HLSFormat", "YouTubeVideo"]
 
+class VideoThumbnail(TypedDict):
+    url: str
+    width: int
+    height: int
 
 @dataclass
 class HLSFormat:
@@ -89,7 +93,7 @@ class YouTubeVideo:  # pylint: disable=too-many-instance-attributes
     is_live: bool
     keywords: List[str]
     title: str
-    thumbnails: List[dict]
+    thumbnails: List[VideoThumbnail]
     video_fmts: List[Optional[VideoFormat]]
     views: Optional[int]
 
@@ -208,3 +212,4 @@ def parse_m3u8(content: str) -> List[Optional[HLSFormat]]:
         )
         for result in pattern.finditer(content)
     ]
+
