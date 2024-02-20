@@ -54,3 +54,6 @@ class YouTubePlaylist:  # pylint: disable=too-many-instance-attributes
 
     def __repr__(self):
         return f'<playlist author_name="{self.author_name}" id={self.id} title="{self.title}" video_count={self.video_count} views={self.views}>'
+
+    def __getitem__(self, idx: int) -> PlaylistVideoPreview:
+        return self.videos[idx]

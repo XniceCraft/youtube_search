@@ -17,7 +17,7 @@ class SearchData(TypedDict):
     continuation: str
 
 
-@dataclass(eq=False)
+@dataclass(eq=False, repr=False)
 class SearchVideoPreview:  # pylint: disable=too-many-instance-attributes
     """
     Contains video information
@@ -35,11 +35,13 @@ class SearchVideoPreview:  # pylint: disable=too-many-instance-attributes
     url_suffix: str
     views: int
 
-    def __eq__(self, item: Any):
+    def __eq__(self, item: Any) -> bool:
         if not isinstance(item, SearchVideoPreview):
             return False
         return item.id == self.id
 
+    def __repr__(self) -> str:
+        return f"<search video channel=\"{channel}\">"
 
 class SearchResult:
     def __init__(self, query: str):
@@ -51,6 +53,9 @@ class SearchResult:
 
     def __repr__(self):
         return f'<search query="{self.query}" total_result={len(self.result)}>'
+
+    def __getitem__(self, idx: int) -> SearchVideoPreview:
+        return self.result[idx]
 
     def get(self, cache: bool = True) -> List[Optional[SearchVideoPreview]]:
         """

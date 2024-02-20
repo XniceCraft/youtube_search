@@ -29,10 +29,10 @@ from .video import (
 
 BASE_URL = "https://www.youtube.com"
 YOUTUBE_VIDEO_REGEX = re.compile(
-    r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:(?:watch|v|embed|live)(?:\?v=|/)|shorts/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})(?:[\?&][a-zA-Z0-9\_-]+=[a-zA-Z0-9\_\.-]+)*$"
+    r"^(?:https?://)(?:youtu\.be/|(?:www\.|m\.)?youtube\.com/(?:(?:watch|v|embed|live)(?:\?v=|/)|shorts/))(?P<video_id>[a-zA-Z0-9\_-]{7,15})"
 )
 YOUTUBE_PLAYLIST_REGEX = re.compile(
-    r"^(?:https?://)(?:www\.)?(?:youtube\.com/playlist\?list=)(?P<playlist_id>[a-zA-Z0-9\_-]+)$"
+    r"^(?:https?://)(?:www\.)?(?:youtube\.com/playlist\?list=)(?P<playlist_id>[a-zA-Z0-9\_-]+)"
 )
 YOUTUBE_REQUEST_HEADERS = {
     "Origin": BASE_URL,
@@ -46,6 +46,9 @@ ClientSessionDict = TypedDict(
 
 
 class YouTube:
+    """
+    The main class for YouTube parsing
+    """
     def __init__(
         self,
         language: str = "",
@@ -53,7 +56,7 @@ class YouTube:
         json_parser: Optional[ModuleType] = None,
         session: Optional[ClientSessionDict] = None,
         pool: Optional[concurrent.futures.ThreadPoolExecutor] = None,
-    ):
+    ):  #  pylint: disable=too-many-arguments
         self.json = json_parser or json
         self.pool = pool
         self.session: ClientSessionDict = session or {"async": None, "sync": None}
@@ -560,14 +563,18 @@ class YouTube:
         await asyncio.gather(*[send_req() for _ in range(pages)])
         return search_result
 
-    def video(self, url: str, check_url=True) -> YouTubeVideo:
+    def video(
+        self,
+        url_or_preview: Union[str, SearchVideoPreview, PlaylistVideoPreview],
+        check_url=True,
+    ) -> YouTubeVideo:
         """
         Get YouTube Video information
 
         Parameters
         ----------
-        url : str
-            YouTube video url
+        url_or_preview : Union[str, SearchVideoPreview, PlaylistVideoPreview]
+            YouTube video url or video preview
         check_url : bool, optional
             Check if the url is valid, by default True
 
@@ -580,10 +587,15 @@ class YouTube:
         InvalidURLError
             Raised if url does't pass regex check
         """
-        if check_url and not YOUTUBE_VIDEO_REGEX.match(url):
-            raise InvalidURLError(f"{url} isn't valid YouTube video url")
+        if isinstance(url_or_preview, (SearchVideoPreview, PlaylistVideoPreview)):
+            url_or_preview = f"{BASE_URL}/watch?v={url_or_preview.id}"
+            check_url = False
+
+        if check_url and not YOUTUBE_VIDEO_REGEX.match(url_or_preview):
+            raise InvalidURLError(f"{url_or_preview} isn't valid YouTube video url")
+
         resp = self.session["sync"].get(
-            url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+            url_or_preview, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
         )
         resp.raise_for_status()
         result = self._extract_video(resp.text)
@@ -597,14 +609,18 @@ class YouTube:
         result[0].hls_fmts = parse_m3u8(resp.text)
         return result[0]
 
-    async def avideo(self, url: str, check_url=True) -> YouTubeVideo:
+    async def avideo(
+        self,
+        url_or_preview: Union[str, SearchVideoPreview, PlaylistVideoPreview],
+        check_url=True,
+    ) -> YouTubeVideo:
         """
         Get YouTube Video information
 
         Parameters
         ----------
-        url : str
-            YouTube video url
+        url_or_preview : Union[str, SearchVideoPreview, PlaylistVideoPreview]
+            YouTube video url or preview
         check_url : bool, optional
             Check if the url is valid, by default True
 
@@ -617,10 +633,15 @@ class YouTube:
         InvalidURLError
             Raised if url does't pass regex check
         """
-        if check_url and not YOUTUBE_VIDEO_REGEX.match(url):
-            raise InvalidURLError(f"{url} isn't valid YouTube video url")
+        if isinstance(url_or_preview, (SearchVideoPreview, PlaylistVideoPreview)):
+            url_or_preview = f"{BASE_URL}/watch?v={url_or_preview.id}"
+            check_url = False
+
+        if check_url and not YOUTUBE_VIDEO_REGEX.match(url_or_preview):
+            raise InvalidURLError(f"{url_or_preview} isn't valid YouTube video url")
+
         async with self.session["async"].get(
-            url, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
+            url_or_preview, cookies=self._cookies, headers=YOUTUBE_REQUEST_HEADERS
         ) as resp:
             resp.raise_for_status()
             body = await resp.text()

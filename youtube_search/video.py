@@ -105,7 +105,7 @@ class YouTubeVideo:  # pylint: disable=too-many-instance-attributes
     @property
     def audio_fmts_iter(self) -> Iterator[AudioFormat]:
         """
-        Return list generator of audio format
+        Return generator of audio format
 
         Returns
         -------
@@ -133,7 +133,7 @@ class YouTubeVideo:  # pylint: disable=too-many-instance-attributes
     @property
     def formats_iter(self) -> Iterator[Union[AudioFormat, VideoFormat]]:
         """
-        Return list generator of formats
+        Return generator of formats
 
         Returns
         -------
@@ -147,7 +147,7 @@ class YouTubeVideo:  # pylint: disable=too-many-instance-attributes
     @property
     def video_fmts_iter(self) -> Iterator[VideoFormat]:
         """
-        Return list generator of video format
+        Return generator of video format
 
         Returns
         -------
@@ -212,4 +212,3 @@ def parse_m3u8(content: str) -> List[Optional[HLSFormat]]:
         )
         for result in pattern.finditer(content)
     ]
-
