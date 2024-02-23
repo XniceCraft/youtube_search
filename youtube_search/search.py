@@ -33,7 +33,7 @@ class SearchVideoPreview:  # pylint: disable=too-many-instance-attributes
     thumbnails: List[Optional[str]]
     title: str
     url_suffix: str
-    views: int
+    views: str
 
     def __eq__(self, item: Any) -> bool:
         if not isinstance(item, SearchVideoPreview):
@@ -41,7 +41,7 @@ class SearchVideoPreview:  # pylint: disable=too-many-instance-attributes
         return item.id == self.id
 
     def __repr__(self) -> str:
-        return f'<search video channel={self.channel} duration={self.duration} id={self.id} title="{self.title}" views={self.views}>'
+        return f'<search video channel="{self.channel}" duration={self.duration} id={self.id} title="{self.title}" views={self.views}>'
 
 
 class SearchResult:

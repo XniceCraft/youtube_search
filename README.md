@@ -1,9 +1,15 @@
-![](https://badgen.net/static/youtube-search/3.1.0-beta.1/blue)
+![](https://badgen.net/static/youtube-search/4.0.0-beta.1/blue)
 ![](https://img.shields.io/badge/Python-3.8%20%7C%203.9%20%7C%203.10-blue)
 
 ## About
 
-A module to search video and parse playlist and video using web scraping method.
+A module to:
+- Search
+- Parse playlist
+- Parse video
+on youtube using web scraping method.
+
+Forked from : https://github.com/joetats/youtube_search
 
 ## Installation
 ```bash
