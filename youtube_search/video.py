@@ -12,10 +12,12 @@ from .utils import decrypt_youtube_url
 
 __all__ = ["AudioFormat", "VideoFormat", "HLSFormat", "YouTubeVideo"]
 
+
 class VideoThumbnail(TypedDict):
     url: str
     width: int
     height: int
+
 
 @dataclass
 class HLSFormat:

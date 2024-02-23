@@ -49,6 +49,7 @@ class YouTube:
     """
     The main class for YouTube parsing
     """
+
     def __init__(
         self,
         language: str = "",
